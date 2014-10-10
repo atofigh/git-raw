@@ -7,6 +7,7 @@ import os
 import os.path
 import io
 import hashlib
+import stat
 
 gitraw_usage = """\
 git raw:
@@ -88,6 +89,10 @@ def perr(*args, **kwargs):
 def store_mkname(store_path, sha1sum):
     return os.path.join(store_path, sha1sum[0:2], sha1sum)
 
+def chmod_readonly(path):
+    mode = os.stat(path)[stat.ST_MODE]
+    new_mode = mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+    os.chmod(path, new_mode)
 
 # Git class to hold repository and environment states plus some useful functions
 class Git:
@@ -247,8 +252,6 @@ def add(git, args):
             perr(err.strerror)
             return 1
 
-        git.vprint("trying: '" + path + "' -> '" + path_store_name + "'")
-
         if os.path.isfile(path_store_name):
             if os.path.getsize(path_store_name) != path_size:
                 # This is a serious error and should never happen.  Either
@@ -275,6 +278,7 @@ def add(git, args):
                 perr("error: could not move '" + path + "' to store")
                 perr(err.strerror)
                 return 1
+            chmod_readonly(path_store_name)
         try:
             os.symlink(path_store_name, path)
         except OSError as err:
