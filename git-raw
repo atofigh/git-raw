@@ -1,0 +1,303 @@
+#!/usr/bin/env python3
+
+import sys
+import subprocess
+from subprocess import check_output, CalledProcessError
+import os
+import os.path
+import io
+import hashlib
+
+gitraw_usage = """\
+git raw:
+
+this is a usage string\
+"""
+
+# Dictionary containing all git-raw commands. Key is the name of the git
+# raw command as given on the command-line.
+commands = {}
+
+# Decorator
+def command(func):
+    """adds each decorated function to global 'commands' dictionary"""
+    commands[func.__name__.replace("_", "-")] = func
+    return func
+
+
+def main():
+    # at least one command has to be given
+    if len(sys.argv) <= 1:
+        print(gitraw_usage, file=sys.stderr)
+        return 1
+
+    # call the command given with the rest of the command-line parameters
+    try:
+        if sys.argv[1] not in commands:
+            raise UnknownCommandError(sys.argv[1])
+
+        git = Git()
+        return commands[sys.argv[1]](git, sys.argv[2:])
+    except GitRawError as err:
+        print(err, file=sys.stderr)
+        return 1
+
+    return 0
+
+
+# Exception classes for this module
+class GitRawError(Exception):
+    def __init__(self, msg=""):
+        self.msg = "git-raw: " + msg
+
+    def __str__(self):
+        return self.msg
+
+class ImpossibleError(GitRawError):
+    def __init__(self):
+        self.msg = "git-raw: Unknown Error"
+
+class NotInRepoError(GitRawError):
+    def __init__(self):
+        self.msg = "git-raw: not in a git repository"
+
+class UnknownCommandError(GitRawError):
+    def __init__(self, cmd):
+        self.msg = "git-raw: '" + cmd + "' is not a git-raw command"
+
+class NotRawInitialized(GitRawError):
+    def __init__(self):
+        self.msg = "repository is not raw-initialized\n" + "try 'git raw init'"
+
+
+# utility functions
+def compute_sha1(filename):
+    """Compute SHA1 hash for a file's content"""
+
+    hashfun = hashlib.sha1()
+    with open(file=filename, mode='rb') as f:
+        chunk = f.read(io.DEFAULT_BUFFER_SIZE)
+        while (len(chunk) > 0):
+            hashfun.update(chunk)
+            chunk = f.read(io.DEFAULT_BUFFER_SIZE)
+    return hashfun.hexdigest()
+
+def perr(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
+def store_mkname(store_path, sha1sum):
+    return os.path.join(store_path, sha1sum[0:2], sha1sum)
+
+
+# Git class to hold repository and environment states plus some useful functions
+class Git:
+    """
+    Holds git repository state
+
+    An instance of Repo will provide variables and methods to access the
+    state of the current git repository.
+
+    Data members:
+
+    is_verbose
+    top_dir
+    git_dir
+    gitraw_dir
+    stores_dir
+    """
+    def __init__(self):
+        # save the verbose flag from the environment
+        self.is_verbose = os.environ.get("GIT_RAW_VERBOSE") != None
+
+        # make sure we are in a git repository
+        try:
+            output = check_output(["git", "rev-parse", "--is-inside-work-tree"]).rstrip(b"\n")
+        except:
+            raise NotInRepoError
+        else:
+            if output != b"true":
+                raise NotInRepoError
+
+        # save the git top directory
+        try:
+            topdir = check_output(["git", "rev-parse", "--show-toplevel"],
+                                  universal_newlines=True).rstrip("\n")
+        except CalledProcessError as err:
+            raise ImpossibleError
+        else:
+            self.top_dir = topdir
+
+        # save the .git directory
+        try:
+            gitdir = check_output(["git", "rev-parse", "--git-dir"],
+                                  universal_newlines=True).rstrip("\n")
+        except CalledProcessError as err:
+            raise ImpossibleError
+        else:
+            self.git_dir = gitdir
+
+        # various git-raw directories and paths
+        self.gitraw_dir = os.path.join(self.git_dir, "git-raw")
+        self.stores_dir = os.path.join(self.gitraw_dir, "store")
+
+    def vprint(self, *args, **kwargs):
+        """calls builtin print() if GIT_RAW_VERBOSE is set"""
+        if self.is_verbose:
+            print(*args, **kwargs)
+
+    def get_config(self, varname):
+        """
+        Get value of a git config variable
+
+        If the variable is not set, returns None. Otherwise, returns the
+        string as returned by a call to 'git config --get <varname>'.
+        """
+        try:
+            output = check_output(["git", "config", "--get", varname],
+                                  universal_newlines=True,
+                                  stderr=subprocess.STDOUT)
+        except CalledProcessError as err:
+            if err.returncode == 1 and err.output == "":
+                return None
+            elif err.returncode != 0:
+                raise
+
+        return output.rstrip("\n")
+
+    def is_initialized(self):
+        if not os.path.isdir(self.gitraw_dir):
+            return False
+
+        return True
+
+    def path_is_in_repo(self, path):
+        real_path = os.path.realpath(path)
+        git_real_path = os.path.realpath(self.top_dir)
+        rel_path = os.path.relpath(real_path, git_real_path)
+        if rel_path.startswith(os.pardir):
+            return False
+        else:
+            return True
+
+# git-raw commands
+@command
+def init(git, args):
+    usage = "usage: git raw init"
+
+    if len(args) > 0:
+        print("error: unknown option", file=sys.stderr)
+        print(usage, file=sys.stderr)
+        return 1
+
+    if git.is_initialized():
+        print("Git repository is already raw-initialized", file=sys.stderr)
+        return 0
+
+    # create directory structure under $GITDIR/git-raw
+    dirs =  [git.gitraw_dir, git.stores_dir]
+    for path in dirs:
+        os.makedirs(path, exist_ok=True)
+
+    return 0
+
+@command
+def add(git, args):
+    usage = "usage: git raw add <file>..."
+
+    if not git.is_initialized():
+        raise NotRawInitialized()
+
+    if len(args) == 0:
+        perr("error: no files specified")
+        perr(usage)
+        return 1
+
+    paths = args
+    store_dir = git.stores_dir
+
+    # check specified paths
+    for path in paths:
+        if os.path.islink(path):
+            perr("error: '" + path + "' is a soft link")
+            return 1
+
+        if not os.path.lexists(path):
+            perr("error: path '" + path + "' not found")
+            return 1
+
+        if os.path.isdir(path):
+            perr("error: '" + path + "' is a directory")
+            perr("recursively adding files in directories is not supported")
+            perr("add each file separately")
+            return 1
+
+        if not git.path_is_in_repo(path):
+            perr("error: '" + path + "' is outside repository")
+            return 1
+
+    for path in paths:
+        path_sha1 = compute_sha1(path)
+        path_store_name = store_mkname(store_dir, path_sha1)
+        path_size = os.path.getsize(path)
+
+        try:
+            os.makedirs(os.path.dirname(path_store_name), exist_ok=True)
+        except OSError as err:
+            perr("error: could not create store directory '" + os.path.dirname(path_store_name) + "'")
+            perr(err.strerror)
+            return 1
+
+        git.vprint("trying: '" + path + "' -> '" + path_store_name + "'")
+
+        if os.path.isfile(path_store_name):
+            if os.path.getsize(path_store_name) != path_size:
+                # This is a serious error and should never happen.  Either
+                # we have a sha1 collision (extremely unlikely) or the file
+                # already in the store is corrupt.
+                perr("fatal error: content of '" + path + "' already exists in content store as:")
+                perr("    " + path_store_name)
+                perr("but their sizes do not match")
+                perr("the content in the store may be corrupt!")
+                return 2
+
+            # the content of the file is already in the store
+            try:
+                os.remove(path)
+            except OSError as err:
+                perr("error: could not remove '" + path + "'")
+                perr(err.strerror)
+                return 1
+        else:
+            # the content must be moved to the store
+            try:
+                os.rename(path, path_store_name)
+            except OSError as err:
+                perr("error: could not move '" + path + "' to store")
+                perr(err.strerror)
+                return 1
+        try:
+            os.symlink(path_store_name, path)
+        except OSError as err:
+            perr("error: could not create soft link for '" + path + "' to")
+            perr("  '" + path_store_name + "'")
+            return 1
+
+        # at this point everything worked for path and it has been
+        # turned into a soft link. Now stage this file.
+        return subprocess.call(["git", "add", path])
+
+@command
+def check(git, args):
+    git = Git()
+
+    print(dirs)
+    return 0
+
+
+# add command names to usage string
+gitraw_usage = gitraw_usage + "\n\nAvailable commands: \n" + \
+        "\n    git-raw " + "\n    git-raw ".join(commands.keys())
+
+
+if __name__ == "__main__":
+    sys.exit(main())
