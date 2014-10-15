@@ -1,79 +1,102 @@
 #!/usr/bin/env python3
 
 import sys
-import subprocess
-from subprocess import check_output, CalledProcessError
 import os
 import os.path
 import io
-import hashlib
 import stat
+import hashlib
+import subprocess
+from subprocess import check_output, CalledProcessError
 
 gitraw_usage = """\
-git raw:
+usage: git raw <command> [<args>]
 
-this is a usage string\
+git-raw is a plug-in for git that simplifies the process of storing and
+managing large and/or binary files that need to be kept in sync with a
+source code repository.
 """
 
-# Dictionary containing all git-raw commands. Key is the name of the git
-# raw command as given on the command-line.
+# Each git-raw command is stored in a dictionary 'commands' with its
+# name, as used on the command line, as the key. A '@command' decorator
+# is used to streamline the insertion of each command into 'commands'.
+#
+# The 'main()' function will simply parse the command line and pass
+# arguments to the available commands, while catching any resulting
+# exceptions.
 commands = {}
 
-# Decorator
 def command(func):
-    """adds each decorated function to global 'commands' dictionary"""
+    """Function decorator for git-raw commands
+
+    adds each decorated function to the global 'commands' dictionary
+    using the function's name, with "_" replaced with "-" as key.
+
+    Args:
+        func: A python function that implements a git-raw command
+
+    Returns:
+        func unaltered
+    """
+
     commands[func.__name__.replace("_", "-")] = func
     return func
 
 
-def main():
-    # at least one command has to be given
-    if len(sys.argv) <= 1:
-        print(gitraw_usage, file=sys.stderr)
-        return 1
-
-    # call the command given with the rest of the command-line parameters
-    try:
-        if sys.argv[1] not in commands:
-            raise UnknownCommandError(sys.argv[1])
-
-        git = Git()
-        return commands[sys.argv[1]](git, sys.argv[2:])
-    except GitRawError as err:
-        print(err, file=sys.stderr)
-        return 1
-
-    return 0
-
-
-# Exception classes for this module
+# Exception classes
 class GitRawError(Exception):
     def __init__(self, msg=""):
-        self.msg = "git-raw: " + msg
+        self.msg = msg
 
     def __str__(self):
         return self.msg
 
 class ImpossibleError(GitRawError):
     def __init__(self):
-        self.msg = "git-raw: Unknown Error"
+        super().__init__("Unexpected failure")
 
 class NotInRepoError(GitRawError):
     def __init__(self):
-        self.msg = "git-raw: not in a git repository"
+        super().__init__("not in a git repository")
 
 class UnknownCommandError(GitRawError):
     def __init__(self, cmd):
-        self.msg = "git-raw: '" + cmd + "' is not a git-raw command"
+        super().__init__("'" + cmd + "' is not a git-raw command")
 
 class NotRawInitialized(GitRawError):
     def __init__(self):
-        self.msg = "repository is not raw-initialized\n" + "try 'git raw init'"
+        super().__init__("repository is not raw-initialized\n" + "try 'git raw init'")
 
 
 # utility functions
+def perr(*args, **kwargs):
+    """Print to sys.stderr
+
+    Forwards the call to builtin print() function but sets the output
+    stream to sys.stderr.
+    """
+
+    print(*args, file=sys.stderr, **kwargs)
+
+def vprint(*args, **kwargs):
+    """Print message if in verbose mode
+
+    Forward call to builtin print() function if the environment variable
+    GIT_RAW_VERBOSE is set.
+    """
+
+    if os.environ.get("GIT_RAW_VERBOSE") != None:
+        print(*args, **kwargs)
+
 def compute_sha1(filename):
-    """Compute SHA1 hash for a file's content"""
+    """Compute SHA1 hash for a file's content
+
+    Args:
+        filename: A string containing path to a file
+
+    Returns:
+        A string representation of the file's SHA1 sum in hexadecimal
+    """
 
     hashfun = hashlib.sha1()
     with open(file=filename, mode='rb') as f:
@@ -83,38 +106,63 @@ def compute_sha1(filename):
             chunk = f.read(io.DEFAULT_BUFFER_SIZE)
     return hashfun.hexdigest()
 
-def perr(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
-
 def store_mkname(store_path, sha1sum):
+    """Create a store filename based on a SHA1 hash
+
+    Args:
+        store_path: A string containing a path
+        sha1sum: A string containing a SHA1 hash
+
+    Returns:
+        A string containing a path that can be used to store or find a
+        file with SHA1 hash value 'sha1sum' in a content store.
+    """
+
     return os.path.join(store_path, sha1sum[0:2], sha1sum)
 
 def chmod_readonly(path):
+    """Unset all write permissions on 'path'
+
+    Unset write permissions of user, group and other for the given path
+
+    Args:
+        path: A string containing a path
+
+    Returns:
+        None
+    """
+
     mode = os.stat(path)[stat.ST_MODE]
     new_mode = mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
     os.chmod(path, new_mode)
 
+
 # Git class to hold repository and environment states plus some useful functions
 class Git:
+    """Git repository and git-raw state information
+
+    An instance of Repo provides variables and methods to access and modify
+    the state of the git repository in the current directory.
+
+    Attributes:
+        top_dir: A string containing the absolute path to the top-level git
+            working directory
+        git_dir: A string containing the path to the .git directory
+        gitraw_dir: A string containing the path inside the .git
+            directory containing all git-raw-associated files. Exists
+            only for already git-raw-initialized repositories.
+        stores_dir: path to the local content store inside
+            'gitraw_dir'. Exists only for already git-raw-initialized
+            repositories.
     """
-    Holds git repository state
 
-    An instance of Repo will provide variables and methods to access the
-    state of the current git repository.
-
-    Data members:
-
-    is_verbose
-    top_dir
-    git_dir
-    gitraw_dir
-    stores_dir
-    """
     def __init__(self):
-        # save the verbose flag from the environment
-        self.is_verbose = os.environ.get("GIT_RAW_VERBOSE") != None
+        """Check that we are inside a git repository and init a Git instance
 
-        # make sure we are in a git repository
+        Raises:
+            NotInRepoError: The current directory is not a git repository
+        """
+
         try:
             output = check_output(["git", "rev-parse", "--is-inside-work-tree"]).rstrip(b"\n")
         except:
@@ -125,38 +173,46 @@ class Git:
 
         # save the git top directory
         try:
-            topdir = check_output(["git", "rev-parse", "--show-toplevel"],
-                                  universal_newlines=True).rstrip("\n")
+            self.top_dir = check_output(["git", "rev-parse", "--show-toplevel"],
+                                        universal_newlines=True).rstrip("\n")
         except CalledProcessError as err:
             raise ImpossibleError
-        else:
-            self.top_dir = topdir
 
         # save the .git directory
         try:
-            gitdir = check_output(["git", "rev-parse", "--git-dir"],
-                                  universal_newlines=True).rstrip("\n")
+            self.git_dir = check_output(["git", "rev-parse", "--git-dir"],
+                                        universal_newlines=True).rstrip("\n")
         except CalledProcessError as err:
             raise ImpossibleError
-        else:
-            self.git_dir = gitdir
 
         # various git-raw directories and paths
         self.gitraw_dir = os.path.join(self.git_dir, "git-raw")
         self.stores_dir = os.path.join(self.gitraw_dir, "store")
 
-    def vprint(self, *args, **kwargs):
-        """calls builtin print() if GIT_RAW_VERBOSE is set"""
-        if self.is_verbose:
-            print(*args, **kwargs)
+    def is_initialized(self):
+        """Check if repository is git-raw-initialized
+
+        Returns:
+            True if the current git repository is git-raw-initialized,
+            False otherwise.
+        """
+
+        if not os.path.isdir(self.gitraw_dir):
+            return False
+
+        return True
 
     def get_config(self, varname):
-        """
-        Get value of a git config variable
+        """Get value of a git config variable by calling "git config --get"
 
-        If the variable is not set, returns None. Otherwise, returns the
-        string as returned by a call to 'git config --get <varname>'.
+        Args:
+            varname: A string containing the name of a config variable
+
+        Returns:
+            None if the variable is not set, otherwise the string
+            returned by a call to "git config --get <varname>"
         """
+
         try:
             output = check_output(["git", "config", "--get", varname],
                                   universal_newlines=True,
@@ -165,17 +221,21 @@ class Git:
             if err.returncode == 1 and err.output == "":
                 return None
             elif err.returncode != 0:
-                raise
+                raise ImpossibleError
 
         return output.rstrip("\n")
 
-    def is_initialized(self):
-        if not os.path.isdir(self.gitraw_dir):
-            return False
-
-        return True
-
     def path_is_in_repo(self, path):
+        """Check if a path is inside the current git repository
+
+        Args:
+            path: A string containing a path
+
+        Returns:
+            True if 'path' points to location inside the current git
+            repository, False otherwise.
+        """
+
         real_path = os.path.realpath(path)
         git_real_path = os.path.realpath(self.top_dir)
         rel_path = os.path.relpath(real_path, git_real_path)
@@ -184,9 +244,16 @@ class Git:
         else:
             return True
 
+
 # git-raw commands
+#
+# Each git-raw command is implemented by a single function. Each such
+# function takes two arguments: An instance 'git' of class 'Git' and a
+# list 'args' of command-line arguments.
 @command
 def init(git, args):
+    """Initialize git repository for use by git-raw"""
+
     usage = "usage: git raw init"
 
     if len(args) > 0:
@@ -207,6 +274,8 @@ def init(git, args):
 
 @command
 def add(git, args):
+    """Add file to a content store and replace with a soft link"""
+
     usage = "usage: git raw add <file>..."
 
     if not git.is_initialized():
@@ -292,15 +361,32 @@ def add(git, args):
 
 @command
 def check(git, args):
-    git = Git()
+    """A dummy command used during development/debugging"""
 
-    print(dirs)
     return 0
 
 
 # add command names to usage string
-gitraw_usage = gitraw_usage + "\n\nAvailable commands: \n" + \
-        "\n    git-raw " + "\n    git-raw ".join(commands.keys())
+commands_usages_short = ["    " + name + " "*(8 - len(name)) + f.__doc__.split('\n', 1)[0] for (name, f) in commands.items()]
+commands_usages_short.sort()
+gitraw_usage = gitraw_usage + "\n\nAvailable commands: \n" + "\n".join(commands_usages_short)
+
+def main():
+    if len(sys.argv) <= 1:
+        perr(gitraw_usage)
+        return 1
+
+    try:
+        if sys.argv[1] not in commands:
+            raise UnknownCommandError(sys.argv[1])
+
+        git = Git()
+        return commands[sys.argv[1]](git, sys.argv[2:])
+    except GitRawError as err:
+        perr("git-raw:", err)
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
