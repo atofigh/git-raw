@@ -114,27 +114,34 @@ def store_mkname(store_path, sha1sum):
         sha1sum: A string containing a SHA1 hash
 
     Returns:
-        A string containing a path that can be used to store or find a
-        file with SHA1 hash value 'sha1sum' in a content store.
+
+        A pair of strings containing a path (first item) and basename
+        (second item) that can be used to store or find a file with SHA1
+        hash value 'sha1sum' in a content store. Joining the two items
+        with os.path.join() gives the full path of the file in the
+        store.
     """
 
-    return os.path.join(store_path, sha1sum[0:2], sha1sum)
+    return (os.path.join(store_path, sha1sum[0:2], sha1sum), "raw")
 
 def chmod_readonly(path):
     """Unset all write permissions on 'path'
 
-    Unset write permissions of user, group and other for the given path
+    Unset write permissions of user, group and other for the given
+    path. This is a no-op if the write permissions are already unset.
 
     Args:
         path: A string containing a path
 
     Returns:
         None
+
     """
 
     mode = os.stat(path)[stat.ST_MODE]
     new_mode = mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
-    os.chmod(path, new_mode)
+    if mode != new_mode:
+        os.chmod(path, new_mode)
 
 
 # Git class to hold repository and environment states plus some useful functions
@@ -311,23 +318,24 @@ def add(git, args):
 
     for path in paths:
         path_sha1 = compute_sha1(path)
-        path_store_name = store_mkname(store_dir, path_sha1)
+        path_dir_name, path_base_name = store_mkname(store_dir, path_sha1)
+        path_full_name = os.path.join(path_dir_name, path_base_name)
         path_size = os.path.getsize(path)
 
         try:
-            os.makedirs(os.path.dirname(path_store_name), exist_ok=True)
+            os.makedirs(path_dir_name, exist_ok=True)
         except OSError as err:
-            perr("error: could not create store directory '" + os.path.dirname(path_store_name) + "'")
+            perr("error: could not create store directory '" + path_dir_name + "'")
             perr(err.strerror)
             return 1
 
-        if os.path.isfile(path_store_name):
-            if os.path.getsize(path_store_name) != path_size:
+        if os.path.isfile(path_full_name):
+            if os.path.getsize(path_full_name) != path_size:
                 # This is a serious error and should never happen.  Either
                 # we have a sha1 collision (extremely unlikely) or the file
                 # already in the store is corrupt.
                 perr("fatal error: content of '" + path + "' already exists in content store as:")
-                perr("    " + path_store_name)
+                perr("    " + path_full_name)
                 perr("but their sizes do not match")
                 perr("the content in the store may be corrupt!")
                 return 2
@@ -342,18 +350,23 @@ def add(git, args):
         else:
             # the content must be moved to the store
             try:
-                os.rename(path, path_store_name)
+                os.rename(path, path_full_name)
             except OSError as err:
                 perr("error: could not move '" + path + "' to store")
                 perr(err.strerror)
                 return 1
-            chmod_readonly(path_store_name)
         try:
-            os.symlink(path_store_name, path)
+            os.symlink(path_full_name, path)
         except OSError as err:
             perr("error: could not create soft link for '" + path + "' to")
-            perr("  '" + path_store_name + "'")
+            perr("  '" + path_full_name + "'")
             return 1
+
+        try:
+            chmod_readonly(path_full_name)
+        except OSError as err:
+            perr("warning: could not remove write permissions on '" + path_dir_name + "'")
+            perr(err.strerror)
 
         # at this point everything worked for path and it has been
         # turned into a soft link. Now stage this file.
