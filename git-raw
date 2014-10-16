@@ -110,7 +110,7 @@ def store_mkname(store_path, sha1sum):
     """Create a store filename based on a SHA1 hash
 
     Args:
-        store_path: A string containing a path
+        store_path: A string containing a path to a content store
         sha1sum: A string containing a SHA1 hash
 
     Returns:
