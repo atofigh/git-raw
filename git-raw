@@ -320,6 +320,7 @@ def add(git, args):
         path_sha1 = compute_sha1(path)
         path_dir_name, path_base_name = store_mkname(store_dir, path_sha1)
         path_full_name = os.path.join(path_dir_name, path_base_name)
+        path_rel_name = os.path.relpath(path_full_name, os.path.dirname(os.path.realpath(path)))
         path_size = os.path.getsize(path)
 
         try:
@@ -356,7 +357,7 @@ def add(git, args):
                 perr(err.strerror)
                 return 1
         try:
-            os.symlink(path_full_name, path)
+            os.symlink(path_rel_name, path)
         except OSError as err:
             perr("error: could not create soft link for '" + path + "' to")
             perr("  '" + path_full_name + "'")
