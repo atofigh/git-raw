@@ -9,6 +9,7 @@ import hashlib
 import subprocess
 from subprocess import check_output, CalledProcessError
 import re
+import shutil
 
 gitraw_usage = """\
 usage: git raw <command> [<args>]
@@ -266,6 +267,8 @@ class Git:
             if path points to an existing directory.
         """
 
+        dirname = os.path.dirname
+
         if not os.path.lexists(path) or not os.path.islink(path) or os.path.isdir(path):
             return False
 
@@ -273,21 +276,27 @@ class Git:
             return False
 
         target = os.readlink(path)
-        target_augmented = os.path.join(os.path.dirname(path), target)
 
         if (os.path.isabs(target)):
             return False
 
-        match = re.search(os.sep + "([0-9a-z]{2})" + os.sep + "\\1[0-9a-z]{38}" + os.sep + "raw$", target)
+        # check if the target of the link ends with something like
+        # "/ab/abcdef1234.../raw"
+        match = re.search(os.sep + "([0-9a-f]{2})" + os.sep + "\\1[0-9a-f]{38}" + os.sep + "raw$", target)
         if (match == None):
             return False
 
+        # remove from target the last part (that we already know
+        # exists). This is important, because we don't want to return
+        # False if the actual raw file is missing from the content store.
+        target = dirname(dirname(dirname(target)))
+        target_augmented = os.path.join(dirname(path), target)
         while (len(target) > 0):
             if os.path.isdir(target_augmented) and os.path.samefile(target_augmented, self.stores_dir):
                 return True
 
-            target = os.path.dirname(target)
-            target_augmented = os.path.join(os.path.dirname(path), target)
+            target = dirname(target)
+            target_augmented = os.path.join(dirname(path), target)
 
         return False
 
@@ -412,6 +421,45 @@ def add(git, args):
         # at this point everything worked for path and it has been
         # turned into a soft link. Now stage this file.
         return subprocess.call(["git", "add", path])
+
+@command
+def revert(git, args):
+    """replace symbolic link with a copy of its content from a content store"""
+
+    usage = "git raw revert <file>..."
+
+    if not git.is_initialized():
+        raise NotRawInitialized()
+
+    if len(args) == 0:
+        perr("error: no files specified")
+        perr(usage)
+        return 1
+
+    paths = args
+
+    # check that every path is a link to a store
+    for path in paths:
+        if not git.path_is_raw_link(path):
+            perr("error: '" + path + "' is not a raw file")
+            return 1
+
+        if not os.path.exists(path):
+            perr("error: cannot revert '" + path + "'")
+            perr("'" + os.readlink(path) + "' does not exist")
+            return 1
+
+    for path in paths:
+        target = os.path.realpath(os.path.join(os.path.dirname(path), os.readlink(path)))
+
+        if not os.path.exists(path):
+            perr("error: '" + target + "' does not exist")
+            return 1
+
+        os.remove(path)
+        shutil.copy2(target, path)
+        mode = os.stat(path)[stat.ST_MODE]
+        os.chmod(path, mode | stat.S_IWUSR)
 
 @command
 def check(git, args):
