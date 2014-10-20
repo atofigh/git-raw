@@ -8,6 +8,7 @@ import stat
 import hashlib
 import subprocess
 from subprocess import check_output, CalledProcessError
+import re
 
 gitraw_usage = """\
 usage: git raw <command> [<args>]
@@ -250,6 +251,45 @@ class Git:
             return False
         else:
             return True
+
+    def path_is_raw_link(self, path):
+        """Check if a path is a symbolic link to a content store
+
+        Args:
+            path: A string containing a path
+
+        Returns:
+            True if the path is a symbolic link inside the current
+            repository that points to a valid (but possibly
+            non-existant) raw path under 'self.stores_dir' via a
+            relative path, and False otherwise. False is also returned
+            if path points to an existing directory.
+        """
+
+        if not os.path.lexists(path) or not os.path.islink(path) or os.path.isdir(path):
+            return False
+
+        if not self.path_is_in_repo(path):
+            return False
+
+        target = os.readlink(path)
+        target_augmented = os.path.join(os.path.dirname(path), target)
+
+        if (os.path.isabs(target)):
+            return False
+
+        match = re.search(os.sep + "([0-9a-z]{2})" + os.sep + "\\1[0-9a-z]{38}" + os.sep + "raw$", target)
+        if (match == None):
+            return False
+
+        while (len(target) > 0):
+            if os.path.isdir(target_augmented) and os.path.samefile(target_augmented, self.stores_dir):
+                return True
+
+            target = os.path.dirname(target)
+            target_augmented = os.path.join(os.path.dirname(path), target)
+
+        return False
 
 
 # git-raw commands
