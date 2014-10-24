@@ -10,6 +10,7 @@ import subprocess
 from subprocess import check_output, CalledProcessError
 import re
 import shutil
+import time
 
 gitraw_usage = """\
 usage: git raw <command> [<args>]
@@ -399,8 +400,10 @@ def add(git, args):
 
     for path in paths:
         path_sha1 = compute_sha1(path)
+        path_real = os.path.realpath(path)
         path_dir_name, path_base_name = store_mkname(store_dir, path_sha1)
         path_full_name = os.path.join(path_dir_name, path_base_name)
+        log_full_name = os.path.join(path_dir_name, "log")
         path_rel_name = os.path.relpath(path_full_name, os.path.dirname(os.path.realpath(path)))
         path_size = os.path.getsize(path)
 
@@ -437,6 +440,14 @@ def add(git, args):
                 perr("error: could not move '" + path + "' to store")
                 perr(err.strerror)
                 return 1
+
+        # write to log file
+        with open(log_full_name, "a") as logfile:
+            logfile.write(time.strftime("%Y-%m-%d %H:%M:%S" + "\t"))
+            logfile.write("add" + "\t")
+            logfile.write(os.path.basename(git.top_dir) + "\t")
+            logfile.write(os.path.relpath(path_real, git.top_dir) + "\n")
+
         try:
             os.symlink(path_rel_name, path)
         except OSError as err:
