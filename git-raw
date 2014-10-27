@@ -536,6 +536,57 @@ def unlock(git, args):
 
     return 0
 
+@command
+def ls(git, args):
+    """list symbolic links to content stores"""
+
+    usage = "git raw ls [<file>...]"
+
+    if not git.is_initialized():
+        raise NotRawInitialized()
+
+    paths = args
+
+    for path in paths:
+        if not os.path.lexists(path):
+            perr("error: '" + path + "' does not exist")
+            return 1
+
+    # get all links in the index
+    try:
+        output = check_output(["git", "ls-files", "--cached", "--stage", "-z"] + paths,
+                              universal_newlines=True)
+    except CalledProcessError as err:
+        if not err.output.endswith("is outside repository\n"):
+            raise ImpossibleError
+
+        perr(err.output)
+        return 1
+    links = [p.split(maxsplit=3)[-1] for p in output.split("\0") if p[0:2] == "12"]
+
+    # get files not in the index
+    try:
+        output = check_output(["git", "ls-files", "--others", "-z"],
+                              universal_newlines=True)
+    except CalledProcessError as err:
+        raise ImpossibleError
+    others = output.split("\0")
+
+    # get all deleted files
+    try:
+        output = check_output(["git", "ls-files", "--deleted", "-z"],
+                              universal_newlines=True)
+    except CalledProcessError as err:
+        raise ImpossibleError
+    deleted = output.split("\0")
+
+    raw_links = [p for p in links + others if p not in deleted and git.path_is_raw_link(p)]
+
+    for rl in raw_links:
+        print(rl)
+
+    return 0
+
 
 @command
 def check(git, args):
