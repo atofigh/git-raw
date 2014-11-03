@@ -11,6 +11,7 @@ from subprocess import check_output, CalledProcessError
 import re
 import shutil
 import time
+import configparser
 
 gitraw_usage = """\
 usage: git raw <command> [<args>]
@@ -70,6 +71,10 @@ class NotRawInitializedError(GitRawError):
     def __init__(self):
         super().__init__("repository is not raw-initialized\n" + "try 'git raw init'")
 
+class BadRawStateError(GitRawError):
+    def __init(self, msg):
+        super().__init__(msg)
+
 
 # utility functions
 def perr(*args, **kwargs):
@@ -118,14 +123,12 @@ def store_mkname(store_path, sha1sum):
 
     Returns:
 
-        A pair of strings containing a path (first item) and basename
-        (second item) that can be used to store or find a file with SHA1
-        hash value 'sha1sum' in a content store. Joining the two items
-        with os.path.join() gives the full path of the file in the
-        store.
+        A string containing a path inside store_path where content with
+        SHA1 hash 'sha1sum' can be stored. If 'sha1sum' is abcd..1234,
+        the returned path will be "<store_path>/ab/abcd..1234/raw"
     """
 
-    return (os.path.join(store_path, sha1sum[0:2], sha1sum), "raw")
+    return os.path.join(store_path, sha1sum[0:2], sha1sum, "raw")
 
 def chmod_readonly(path):
     """Unset all write permissions on 'path'
@@ -146,8 +149,22 @@ def chmod_readonly(path):
     if mode != new_mode:
         os.chmod(path, new_mode)
 
+def check_storename(name):
+    """Check if name can be used to name a content store
 
-# Git class to hold repository and environment states plus some useful functions
+    The names used for content stores are restricted to alphanumeric
+    characters plus '_' and '-'.
+
+    Args:
+        name: A string
+
+    Returns:
+        True if 'name' can be used to name a store and False otherwise
+    """
+
+    return re.match("[a-zA-Z0-9_-]+\\Z", name) != None and name != "defaultAddStore"
+
+
 class Git:
     """Git repository and git-raw state information
 
@@ -161,9 +178,12 @@ class Git:
         gitraw_dir: A string containing the path inside the .git
             directory containing all git-raw-associated files. Exists
             only for already git-raw-initialized repositories.
-        stores_dir: path to the local content store inside
-            'gitraw_dir'. Exists only for already git-raw-initialized
-            repositories.
+        index_dir: A string containing the path to the local directory
+            inside 'gitraw_dir' that holds links to raw files in content
+            stores.
+        config_file: A string containing the path to the git raw config file
+        config: A ConfigParser object corresponding to the git-raw
+            config file. Exists only if repository is git-raw-initialized.
         dummy_header: A string that is written to all dummy files with
             the 'unlock' command
     """
@@ -173,6 +193,8 @@ class Git:
 
         Raises:
             NotInRepoError: The current directory is not a git repository
+            BadRawStateError: Git repository is raw-initialized, but
+                something is wrong with the current configuration
         """
 
         try:
@@ -194,14 +216,28 @@ class Git:
         try:
             self.git_dir = check_output(["git", "rev-parse", "--git-dir"],
                                         universal_newlines=True).rstrip("\n")
+            self.git_dir = os.path.abspath(self.git_dir)
         except CalledProcessError as err:
             raise ImpossibleError
 
         # various git-raw directories and paths
         self.gitraw_dir = os.path.join(self.git_dir, "git-raw")
-        self.stores_dir = os.path.join(self.gitraw_dir, "store")
+        self.index_dir = os.path.join(self.gitraw_dir, "index")
+        self.config_file = os.path.join(self.gitraw_dir, "config")
 
         self.dummy_header = "$git raw dummy$"
+
+        if (self.is_initialized()):
+            # create case-sensitive ConfigParser instance
+            self.config = configparser.ConfigParser()
+            self.config.optionxform = lambda option: option
+            # read in the config file and ensure it is parsable
+            try:
+                self.config.read(self.config_file)
+            except:
+                raise BadRawStateError("Bad config file '" + self.config_file + "'")
+
+            self.verify_raw_state()
 
     def is_initialized(self):
         """Check if repository is git-raw-initialized
@@ -215,8 +251,34 @@ class Git:
 
         return os.path.isdir(self.gitraw_dir)
 
+    def verify_raw_state(self):
+        """Verify the current state of git-raw configuration
 
-    def get_config(self, varname):
+        Raises:
+            BadRawStateError: Git repository is raw-initialized, but
+                something is wrong with the current configuration
+        """
+
+        # ensure all required directories exits
+        for rawdir in [self.gitraw_dir, self.index_dir]:
+            if not os.path.exists(rawdir) or not os.path.isdir(rawdir):
+                raise BadRawStateError("'" + rawdir + "' is missing")
+
+        # a "stores" section is mandatory in config file
+        if "stores" not in self.config:
+            raise BadRawStateError("Corrupt config file: no 'stores' section")
+
+        # check consistency of stores configuration variables
+        stores = self.config["stores"]
+        if len(stores) > 0:
+            if "defaultAddStore" not in stores:
+                raise BadRawStateError("Corrupt config file: no default store configured")
+
+            if (stores["defaultAddStore"] not in stores or
+                stores["defaultAddStore"] == "defaultAddStore"):
+                raise BadRawStateError("Corrupt config file: bad default store")
+
+    def get_git_config(self, varname):
         """Get value of a git config variable by calling "git config --get"
 
         Args:
@@ -250,9 +312,8 @@ class Git:
             repository, False otherwise.
         """
 
-        real_path = os.path.realpath(path)
-        git_real_path = os.path.realpath(self.top_dir)
-        rel_path = os.path.relpath(real_path, git_real_path)
+        abs_path = os.path.abspath(path)
+        rel_path = os.path.relpath(abs_path, self.top_dir)
         if rel_path.startswith(os.pardir):
             return False
         else:
@@ -267,7 +328,7 @@ class Git:
         Returns:
             True if the path is a symbolic link inside the current
             repository that points to a valid (but possibly
-            non-existant) raw path under 'self.stores_dir' via a
+            non-existant) raw path under 'self.index_dir' via a
             relative path, and False otherwise. False is also returned
             if path points to an existing directory.
         """
@@ -291,13 +352,14 @@ class Git:
         if (match == None):
             return False
 
+
         # remove from target the last part (that we already know
         # exists). This is important, because we don't want to return
         # False if the actual raw file is missing from the content store.
         target = dirname(dirname(dirname(target)))
         target_augmented = os.path.join(dirname(path), target)
         while (len(target) > 0):
-            if os.path.isdir(target_augmented) and os.path.samefile(target_augmented, self.stores_dir):
+            if os.path.isdir(target_augmented) and os.path.samefile(target_augmented, self.index_dir):
                 return True
 
             target = dirname(target)
@@ -306,7 +368,7 @@ class Git:
         return False
 
     def path_is_raw_dummy(self, path):
-        """check if a path is a dummy file generated by the 'unlock' command
+        """Check if a path is a dummy file generated by the 'unlock' command
 
         Args:
             path: A string containing a path
@@ -330,6 +392,46 @@ class Git:
 
         return True
 
+    def add_to_index(self, store_path, sha1):
+        """Add link to content in a store
+
+        Args:
+            store_path: A string containing a path to a content store
+            sha1: A string with a SHA1 hash
+
+        Returns:
+            None
+
+        Raises:
+            OSError from failed filesystem operations
+        """
+
+        index_link = os.path.dirname(store_mkname(self.index_dir, sha1))
+        store_raw = store_mkname(store_path, sha1)
+
+        if os.path.lexists(index_link):
+            os.remove(index_link)
+
+        os.makedirs(os.path.dirname(index_link), exist_ok=True)
+        os.symlink(os.path.dirname(store_raw), index_link)
+
+    def find_sha1(self, sha1):
+        """Find a store containing specified content
+
+        Args:
+            sha1: A string containing a SHA1 hash
+
+        Returns:
+            A string with the path of the content store that contains
+            the specified content, or None if content could not be found
+            in any store.
+        """
+        for store_name, store_path in self.config["stores"].items():
+            if os.path.isfile(store_mkname(store_path, sha1)):
+                return store_path
+
+        return None
+
 
 # git-raw commands
 #
@@ -352,9 +454,20 @@ def init(git, args):
         return 0
 
     # create directory structure under $GITDIR/git-raw
-    dirs =  [git.gitraw_dir, git.stores_dir]
+    dirs =  [git.gitraw_dir, git.index_dir]
     for path in dirs:
         os.makedirs(path, exist_ok=True)
+
+    # create an empty config file
+    with open(git.config_file, "w") as cfg:
+        config = configparser.ConfigParser()
+        config.add_section("stores")
+        config.write(cfg)
+
+    # write instructions on how to add stores
+    print("Initialized Git repository for git-raw")
+    print("NOTE: no stores have been configured!")
+    print("      use 'git raw add-store' to add content stores")
 
     return 0
 
@@ -372,8 +485,12 @@ def add(git, args):
         perr(usage)
         return 1
 
+    default_store_name = git.config["stores"].get("defaultAddStore")
+    if default_store_name == None:
+        perr("error: no default store configured")
+        return
+    default_store_path = git.config["stores"][default_store_name]
     paths = args
-    store_dir = git.stores_dir
 
     # check specified paths
     for path in paths:
@@ -397,79 +514,94 @@ def add(git, args):
 
         if git.path_is_raw_dummy(path):
             perr("error: '" + path + "' is a placeholder for a git-raw file")
-            perr("use 'git checkout to revert the file to a git-raw link")
+            perr("use git's checkout command to revert the file to a git-raw link")
             return 1
 
     for path in paths:
         path_sha1 = compute_sha1(path)
-        path_real = os.path.realpath(path)
-        path_dir_name, path_base_name = store_mkname(store_dir, path_sha1)
-        path_full_name = os.path.join(path_dir_name, path_base_name)
-        log_full_name = os.path.join(path_dir_name, "log")
-        path_rel_name = os.path.relpath(path_full_name, os.path.dirname(os.path.realpath(path)))
         path_size = os.path.getsize(path)
+        path_abs = os.path.realpath(path)
 
-        try:
-            os.makedirs(path_dir_name, exist_ok=True)
-        except OSError as err:
-            perr("error: could not create store directory '" + path_dir_name + "'")
-            perr(err.strerror)
-            return 1
+        store_path = git.find_sha1(path_sha1)
+        store_raw = None
+        if store_path == None:
+            store_path = default_store_path
+            store_raw = store_mkname(store_path, path_sha1)
+            try:
+                os.makedirs(os.path.dirname(store_raw), exist_ok=True)
+            except OSError as err:
+                perr("error: unable to create directories for '" + store_raw + "'")
+                perr(err.strerror)
+                return 1
+            try:
+                os.rename(path, store_raw)
+            except OSError as err:
+                perr("error: unable to move '" + path + "' to the store")
+                perr(err.strerror)
+                return 1
+        else:
+            store_raw = store_mkname(store_path, path_sha1)
 
-        if os.path.isfile(path_full_name):
-            if os.path.getsize(path_full_name) != path_size:
+            if os.path.getsize(store_raw) != path_size:
                 # This is a serious error and should never happen.  Either
                 # we have a sha1 collision (extremely unlikely) or the file
                 # already in the store is corrupt.
                 perr("fatal error: content of '" + path + "' already exists in content store as:")
-                perr("    " + path_full_name)
-                perr("but their sizes do not match")
-                perr("the content in the store may be corrupt!")
+                perr("    " + store_raw)
+                perr("but their sizes do not match.")
+                perr("*** The content in the store may be corrupt! ***")
                 return 2
 
-            # the content of the file is already in the store
             try:
                 os.remove(path)
             except OSError as err:
-                perr("error: could not remove '" + path + "'")
+                perr("error: unable to replace '" + path + "' with symlink")
                 perr(err.strerror)
                 return 1
-        else:
-            # the content must be moved to the store
-            try:
-                os.rename(path, path_full_name)
-            except OSError as err:
-                perr("error: could not move '" + path + "' to store")
-                perr(err.strerror)
-                return 1
-
-        # write to log file
-        with open(log_full_name, "a") as logfile:
-            logfile.write(time.strftime("%Y-%m-%d %H:%M:%S" + "\t"))
-            logfile.write("add" + "\t")
-            logfile.write(os.path.basename(git.top_dir) + "\t")
-            logfile.write(os.path.relpath(path_real, git.top_dir) + "\n")
 
         try:
-            os.symlink(path_rel_name, path)
+            git.add_to_index(store_path, path_sha1)
         except OSError as err:
-            perr("error: could not create soft link for '" + path + "' to")
-            perr("  '" + path_full_name + "'")
+            perr("error: unable to add symlink to the index")
+            perr(err.strerror)
             return 1
 
         try:
-            chmod_readonly(path_full_name)
+            target = os.path.relpath(store_mkname(git.index_dir, path_sha1),
+                                     os.path.dirname(path_abs))
+            os.symlink(target, path_abs)
         except OSError as err:
-            perr("warning: could not remove write permissions on '" + path_dir_name + "'")
+            perr("error: unable to create symlink")
+            perr(path + " --> " + target)
+            perr(err.strerror)
+            return 1
+
+        # write to log file
+        log_file = os.path.join(os.path.dirname(store_raw), "log")
+        with open(log_file, "a") as logfile:
+            logfile.write(time.strftime("%Y-%m-%d %H:%M:%S" + "\t"))
+            logfile.write("add" + "\t")
+            logfile.write(os.path.basename(git.top_dir) + "\t")
+            logfile.write(os.path.relpath(path_abs, git.top_dir) + "\n")
+
+        try:
+            chmod_readonly(store_raw)
+        except OSError as err:
+            perr("warning: could not remove write permissions on '" + store_raw + "'")
             perr(err.strerror)
 
         # at this point everything worked for path and it has been
         # turned into a soft link. Now stage this file.
-        return subprocess.call(["git", "add", path])
+        ret = subprocess.call(["git", "add", path])
+        if ret != 0:
+            perr("error: failed to stage '" + path + "'")
+            return ret
+
+    return 0
 
 @command
 def revert(git, args):
-    """replace symbolic link with a copy of its content from a content store"""
+    """replace symbolic link with a copy of its content"""
 
     usage = "git raw revert <file>..."
 
@@ -495,7 +627,7 @@ def revert(git, args):
             return 1
 
     for path in paths:
-        target = os.path.realpath(os.path.join(os.path.dirname(path), os.readlink(path)))
+        target = os.path.join(os.path.dirname(path), os.readlink(path))
 
         if not os.path.exists(path):
             perr("error: '" + target + "' does not exist")
@@ -528,7 +660,7 @@ def unlock(git, args):
             return 1
 
     for path in paths:
-        git_path = os.sep + os.path.relpath(path, git.top_dir)
+        git_path = os.path.relpath(path, git.top_dir)
         link_target = os.readlink(path)
 
         os.remove(path)
@@ -589,16 +721,89 @@ def ls(git, args):
 
     return 0
 
+@command
+def add_store(git, args):
+    """add a content store"""
+
+    usage =    "usage: git raw add-store [--set-default] <store-name> <dir>"
+    usage += "\n       git raw add-store --set-default <store-name>"
+
+    if not git.is_initialized():
+        raise NotRawInitializedError()
+
+    if len(args) < 2 or len(args) > 3:
+        perr("error: wrong number of arguments")
+        perr(usage)
+        return 1
+
+    setdefault = False
+    store_name = None
+    directory = None
+
+    argcount = 0
+    for arg in args:
+        if arg == "--set-default":
+            setdefault = True
+            continue
+
+        if argcount == 0:
+            store_name = arg
+            argcount += 1
+        elif argcount == 1:
+            directory = arg
+            argcount += 1
+        else:
+            perr("error: wrong arguments")
+            perr(usage)
+            return 1
+
+    if directory == None:
+        # make an already configured store the default
+        if store_name not in git.config["stores"] or store_name == "defaultAddStore":
+            perr("error: no store named '" + store_name + "'")
+            return 1
+
+        git.config["stores"]["defaultAddStore"] = store_name
+    else:
+        # configure new store
+        if not check_storename(store_name):
+            perr("error: illegal store-name '" + store_name + "'")
+            return 1
+
+        if store_name in git.config["stores"]:
+            perr("error: a store named '" + store_name + "' already exists")
+            return 1
+
+        if not os.path.isdir(directory):
+            perr("error: no such directory '" + directory + "'")
+            return 1
+
+        if setdefault or len(git.config["stores"]) == 0:
+            git.config["stores"]["defaultAddStore"] = store_name
+
+        git.config["stores"][store_name] = os.path.abspath(directory)
+    try:
+        with open(git.config_file, "w") as cfg:
+            git.config.write(cfg)
+    except:
+        perr("error: could not write to config file")
+        return 1
+
+    return 0
 
 @command
 def check(git, args):
     """A dummy command used during development/debugging"""
 
+    print(git.git_dir)
+    print(git.top_dir)
+    print(git.gitraw_dir)
+    print(git.index_dir)
     return 0
 
 
 # add command names to usage string
-commands_usages_short = ["    " + name + " "*(8 - len(name)) + f.__doc__.split('\n', 1)[0] for (name, f) in commands.items()]
+commands_usages_short = ["    " + name + " "*(12 - len(name)) + f.__doc__.split('\n', 1)[0] for (name, f) in commands.items()]
 commands_usages_short.sort()
 gitraw_usage = gitraw_usage + "\n\nAvailable commands: \n" + "\n".join(commands_usages_short)
 
