@@ -343,12 +343,12 @@ def init(git, args):
     usage = "usage: git raw init"
 
     if len(args) > 0:
-        print("error: unknown option", file=sys.stderr)
-        print(usage, file=sys.stderr)
+        perr("error: unknown option")
+        perr(usage)
         return 1
 
     if git.is_initialized():
-        print("Git repository is already raw-initialized", file=sys.stderr)
+        perr("Git repository is already raw-initialized")
         return 0
 
     # create directory structure under $GITDIR/git-raw
