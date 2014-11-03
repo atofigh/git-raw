@@ -66,7 +66,7 @@ class UnknownCommandError(GitRawError):
     def __init__(self, cmd):
         super().__init__("'" + cmd + "' is not a git-raw command")
 
-class NotRawInitialized(GitRawError):
+class NotRawInitializedError(GitRawError):
     def __init__(self):
         super().__init__("repository is not raw-initialized\n" + "try 'git raw init'")
 
@@ -363,7 +363,7 @@ def add(git, args):
     usage = "usage: git raw add <file>..."
 
     if not git.is_initialized():
-        raise NotRawInitialized()
+        raise NotRawInitializedError()
 
     if len(args) == 0:
         perr("error: no files specified")
@@ -472,7 +472,7 @@ def revert(git, args):
     usage = "git raw revert <file>..."
 
     if not git.is_initialized():
-        raise NotRawInitialized()
+        raise NotRawInitializedError()
 
     if len(args) == 0:
         perr("error: no files specified")
@@ -511,7 +511,7 @@ def unlock(git, args):
     usage = "git raw unlock <file>..."
 
     if not git.is_initialized():
-        raise NotRawInitialized()
+        raise NotRawInitializedError()
 
     if len(args) == 0:
         perr("error: no files specified")
@@ -543,7 +543,7 @@ def ls(git, args):
     usage = "git raw ls [<file>...]"
 
     if not git.is_initialized():
-        raise NotRawInitialized()
+        raise NotRawInitializedError()
 
     paths = args
 
