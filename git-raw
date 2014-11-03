@@ -164,6 +164,8 @@ class Git:
         stores_dir: path to the local content store inside
             'gitraw_dir'. Exists only for already git-raw-initialized
             repositories.
+        dummy_header: A string that is written to all dummy files with
+            the 'unlock' command
     """
 
     def __init__(self):
