@@ -16,11 +16,11 @@ The plug-in should
 
 ## Foundations
 
-Similar to Git, git-raw stores files as a set of key/value pairs, with keys being the SHA-1 hash values of each file's content. Within a Git repository, soft links are used to point to file content and to keep track version history.
+Similar to Git, git-raw stores files as a set of key/value pairs, with keys being the SHA-1 hash of each file's content. Within a Git repository, symlinks are used to point to file content and to keep track of version history.
 
 ### Content stores
 
-git-raw can be customized to use multiple user-defined locations for the storage of files. These locations may be directories on local hard drives, network drives, USB drives, etc. and are called content stores. git-raw allows each user to define his/her own preferred set of stores in which to store content. Distinct repositories on the same local machine can share content stores thereby minimize redundancies in cases when different repositories have some large files in common.
+git-raw can be customized to use multiple user-defined locations for the storage of files. These locations may be directories on local hard drives, network drives, USB drives etc., and are called content stores. git-raw allows each user to define his/her own preferred set of stores in which to store content. Distinct repositories on the same local machine can share content stores thereby minimize redundancies in cases when different repositories have some large files in common.
 
 Information about the content stores associated with each repository clone is kept in a separate branch with the special name "git-raw". The "git-raw" branch is handled by the git-raw plugin and stores information that can be used by other clones to obtain the content of files, and if enabled, to push new content to remote Git repositories.
 
@@ -54,5 +54,5 @@ Another reason is that I wanted to be able to keep a single local copy of a larg
 
 This is another project that comes very close to meeting the goals of git-raw. The downsides of git-fat, for my personal use-cases, include
 
-1. does not use soft links, and therefore, requires an extra copy (one in the fat store and one in the working directory) of each large file that you want to work with, even if you only need read access to those large files. This is a big issue for me because I need to be able to handle really huge files (hundreds of GBs). There is no way I would want to have even a single unnecessary copy of one of those files.
+1. does not use symlinks, and therefore, requires an extra copy (one in the fat store and one in the working directory) of each large file that you want to work with, even if you only need read access to those large files. This is a big issue for me because I need to be able to handle really huge files (hundreds of GBs). There is no way I would want to have even a single unnecessary copy of one of those files.
 2. does not (at least currently) support multiple different fat-stores
