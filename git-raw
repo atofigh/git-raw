@@ -40,9 +40,8 @@ def command(func):
         func: A python function that implements a git-raw command
 
     Returns:
-        func unaltered
+        'func' unaltered
     """
-
     commands[func.__name__.replace("_", "-")] = func
     return func
 
@@ -57,7 +56,7 @@ class GitRawError(Exception):
 
 class ImpossibleError(GitRawError):
     def __init__(self):
-        super().__init__("Unexpected failure")
+        super().__init__("unexpected failure")
 
 class NotInRepoError(GitRawError):
     def __init__(self):
@@ -83,7 +82,6 @@ def perr(*args, **kwargs):
     Forwards the call to builtin print() function but sets the output
     stream to sys.stderr.
     """
-
     print(*args, file=sys.stderr, **kwargs)
 
 def vprint(*args, **kwargs):
@@ -92,7 +90,6 @@ def vprint(*args, **kwargs):
     Forward call to builtin print() function if the environment variable
     GIT_RAW_VERBOSE is set.
     """
-
     if os.environ.get("GIT_RAW_VERBOSE") != None:
         print(*args, **kwargs)
 
@@ -100,12 +97,11 @@ def compute_sha1(filename):
     """Compute SHA1 hash for a file's content
 
     Args:
-        filename: A string containing path to a file
+        filename: Path to a file
 
     Returns:
-        A string representation of the file's SHA1 sum in hexadecimal
+        A string representation of 'file's SHA1 hash
     """
-
     hashfun = hashlib.sha1()
     with open(file=filename, mode='rb') as f:
         chunk = f.read(io.DEFAULT_BUFFER_SIZE)
@@ -115,19 +111,17 @@ def compute_sha1(filename):
     return hashfun.hexdigest()
 
 def store_mkname(store_path, sha1sum):
-    """Create a store filename based on a SHA1 hash
+    """Create a path based on a SHA1 hash
 
     Args:
-        store_path: A string containing a path to a content store
+        store_path: Path to a directory
         sha1sum: A string containing a SHA1 hash
 
     Returns:
-
-        A string containing a path inside store_path where content with
-        SHA1 hash 'sha1sum' can be stored. If 'sha1sum' is abcd..1234,
-        the returned path will be "<store_path>/ab/abcd..1234/raw"
+        Path inside 'store_path' where content with SHA1 hash 'sha1sum'
+        can be stored. If 'sha1sum' is "abcd..1234", the returned path
+        will be "<store_path>/ab/abcd..1234/raw"
     """
-
     return os.path.join(store_path, sha1sum[0:2], sha1sum, "raw")
 
 def chmod_readonly(path):
@@ -137,23 +131,22 @@ def chmod_readonly(path):
     path. This is a no-op if the write permissions are already unset.
 
     Args:
-        path: A string containing a path
+        path: Path to file or directory
 
     Returns:
         None
-
     """
-
     mode = os.stat(path)[stat.ST_MODE]
     new_mode = mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
     if mode != new_mode:
         os.chmod(path, new_mode)
 
 def check_storename(name):
-    """Check if name can be used to name a content store
+    """Check if 'name' can be used to name a content store
 
     The names used for content stores are restricted to alphanumeric
-    characters plus '_' and '-'.
+    characters plus "_" and "-". Also, "defaultAddStore" is reserved
+    for defining a default store to be used with the 'add' command.
 
     Args:
         name: A string
@@ -161,33 +154,26 @@ def check_storename(name):
     Returns:
         True if 'name' can be used to name a store and False otherwise
     """
-
     return re.match("[a-zA-Z0-9_-]+\\Z", name) != None and name != "defaultAddStore"
 
 
 class Git:
     """Git repository and git-raw state information
 
-    An instance of Repo provides variables and methods to access and modify
+    An instance of Git provides attributes and methods to access and modify
     the state of the git repository in the current directory.
 
     Attributes:
-        top_dir: A string containing the absolute path to the top-level git
-            working directory
-        git_dir: A string containing the path to the .git directory
-        gitraw_dir: A string containing the path inside the .git
-            directory containing all git-raw-associated files. Exists
-            only for already git-raw-initialized repositories.
-        index_dir: A string containing the path to the local directory
-            inside 'gitraw_dir' that holds links to raw files in content
-            stores.
-        config_file: A string containing the path to the git raw config file
+        top_dir: Absolute path to the top-level git working directory
+        git_dir: Absolute path to the '.git' directory
+        gitraw_dir: Path inside '.git' containing all git-raw-associated files.
+        index_dir: Path inside 'gitraw_dir' that holds symlinks to content stores
+        config_file: Path to the git raw config file
         config: A ConfigParser object corresponding to the git-raw
             config file. Exists only if repository is git-raw-initialized.
-        dummy_header: A string that is written to all dummy files with
+        dummy_header: A string that is written to all dummy files created by
             the 'unlock' command
     """
-
     def __init__(self):
         """Check that we are inside a git repository and init a Git instance
 
@@ -196,7 +182,6 @@ class Git:
             BadRawStateError: Git repository is raw-initialized, but
                 something is wrong with the current configuration
         """
-
         try:
             output = check_output(["git", "rev-parse", "--is-inside-work-tree"]).rstrip(b"\n")
         except:
@@ -205,14 +190,12 @@ class Git:
             if output != b"true":
                 raise NotInRepoError
 
-        # save the git top directory
         try:
             self.top_dir = check_output(["git", "rev-parse", "--show-toplevel"],
                                         universal_newlines=True).rstrip("\n")
         except CalledProcessError as err:
             raise ImpossibleError
 
-        # save the .git directory
         try:
             self.git_dir = check_output(["git", "rev-parse", "--git-dir"],
                                         universal_newlines=True).rstrip("\n")
@@ -220,7 +203,6 @@ class Git:
         except CalledProcessError as err:
             raise ImpossibleError
 
-        # various git-raw directories and paths
         self.gitraw_dir = os.path.join(self.git_dir, "git-raw")
         self.index_dir = os.path.join(self.gitraw_dir, "index")
         self.config_file = os.path.join(self.gitraw_dir, "config")
@@ -240,25 +222,27 @@ class Git:
             self.verify_raw_state()
 
     def is_initialized(self):
-        """Check if repository is git-raw-initialized
+        """Check if repository is raw-initialized
 
         Returns:
-            True if the current git repository is git-raw-initialized,
+            True if the current git repository is raw-initialized,
             False otherwise. No check is made for correctness or
             consistency of the configuration. Currently, we only check
-            if the 'git-raw' directory exists under '.git/'.
+            if the 'gitraw_dir' directory exists.
         """
-
         return os.path.isdir(self.gitraw_dir)
 
     def verify_raw_state(self):
         """Verify the current state of git-raw configuration
 
+        Assumes that the current git repository has been
+        raw-initialized. Ensures that all git-raw directories exists and
+        that the config file is valid.
+
         Raises:
             BadRawStateError: Git repository is raw-initialized, but
                 something is wrong with the current configuration
         """
-
         # ensure all required directories exits
         for rawdir in [self.gitraw_dir, self.index_dir]:
             if not os.path.exists(rawdir) or not os.path.isdir(rawdir):
@@ -285,10 +269,9 @@ class Git:
             varname: A string containing the name of a config variable
 
         Returns:
-            None if the variable is not set, otherwise the string
+            'None' if the variable is not set, otherwise the string
             returned by a call to "git config --get <varname>"
         """
-
         try:
             output = check_output(["git", "config", "--get", varname],
                                   universal_newlines=True,
@@ -311,7 +294,6 @@ class Git:
             True if 'path' points to location inside the current git
             repository, False otherwise.
         """
-
         abs_path = os.path.abspath(path)
         rel_path = os.path.relpath(abs_path, self.top_dir)
         if rel_path.startswith(os.pardir):
@@ -320,19 +302,19 @@ class Git:
             return True
 
     def path_is_raw_link(self, path):
-        """Check if a path is a symbolic link to a content store
+        """Check if a path is a symlink to a content store
 
         Args:
-            path: A string containing a path
+            path: A path
 
         Returns:
-            True if the path is a symbolic link inside the current
-            repository that points to a valid (but possibly
-            non-existant) raw path under 'self.index_dir' via a
-            relative path, and False otherwise. False is also returned
-            if path points to an existing directory.
-        """
 
+            True if 'path' is a symlink inside the current repository
+            whose target is a relative path to a valid (but possibly
+            non-existant) raw path under 'self.index_dir', and False
+            otherwise. False is also returned if 'path' points to an
+            existing directory.
+        """
         dirname = os.path.dirname
 
         if not os.path.lexists(path) or not os.path.islink(path) or os.path.isdir(path):
@@ -346,8 +328,8 @@ class Git:
         if (os.path.isabs(target)):
             return False
 
-        # check if the target of the link ends with something like
-        # "/ab/abcdef1234.../raw"
+        # check if the target of the symlink ends with something like
+        # "/ab/abcd..1234/raw"
         match = re.search(os.sep + "([0-9a-f]{2})" + os.sep + "\\1[0-9a-f]{38}" + os.sep + "raw$", target)
         if (match == None):
             return False
@@ -371,13 +353,12 @@ class Git:
         """Check if a path is a dummy file generated by the 'unlock' command
 
         Args:
-            path: A string containing a path
+            path: A path
 
         Returns:
-            True if the path is a regular file containing the signature
+            True if 'path' is a regular file containing the signature
             of a git raw dummy file, and False otherwise.
         """
-
         if os.path.islink(path) or not os.path.isfile(path):
             return False
 
@@ -393,10 +374,10 @@ class Git:
         return True
 
     def add_to_index(self, store_path, sha1):
-        """Add link to content in a store
+        """Add symlink to content in a store
 
         Args:
-            store_path: A string containing a path to a content store
+            store_path: A path to a content store
             sha1: A string with a SHA1 hash
 
         Returns:
@@ -405,7 +386,6 @@ class Git:
         Raises:
             OSError from failed filesystem operations
         """
-
         index_link = os.path.dirname(store_mkname(self.index_dir, sha1))
         store_raw = store_mkname(store_path, sha1)
 
@@ -422,9 +402,8 @@ class Git:
             sha1: A string containing a SHA1 hash
 
         Returns:
-            A string with the path of the content store that contains
-            the specified content, or None if content could not be found
-            in any store.
+            Path of a content store that contains the specified content,
+            or None if content could not be found in any store.
         """
         for store_name, store_path in self.config["stores"].items():
             if os.path.isfile(store_mkname(store_path, sha1)):
@@ -441,7 +420,6 @@ class Git:
 @command
 def init(git, args):
     """Initialize git repository for use by git-raw"""
-
     usage = "usage: git raw init"
 
     if len(args) > 0:
@@ -473,8 +451,7 @@ def init(git, args):
 
 @command
 def add(git, args):
-    """Add file to a content store and replace with a soft link"""
-
+    """Add file to a content store and replace with a symlink"""
     usage = "usage: git raw add <file>..."
 
     if not git.is_initialized():
@@ -495,7 +472,7 @@ def add(git, args):
     # check specified paths
     for path in paths:
         if os.path.islink(path):
-            perr("error: '" + path + "' is a soft link")
+            perr("error: '" + path + "' is a symlink")
             return 1
 
         if not os.path.lexists(path):
@@ -504,7 +481,7 @@ def add(git, args):
 
         if os.path.isdir(path):
             perr("error: '" + path + "' is a directory")
-            perr("recursively adding files in directories is not supported")
+            perr("recursively adding files in directories is not (yet) supported")
             perr("add each file separately")
             return 1
 
@@ -514,7 +491,7 @@ def add(git, args):
 
         if git.path_is_raw_dummy(path):
             perr("error: '" + path + "' is a placeholder for a git-raw file")
-            perr("use git's checkout command to revert the file to a git-raw link")
+            perr("use git's checkout command to revert the file to a git-raw symlink")
             return 1
 
     for path in paths:
@@ -546,7 +523,7 @@ def add(git, args):
                 # This is a serious error and should never happen.  Either
                 # we have a sha1 collision (extremely unlikely) or the file
                 # already in the store is corrupt.
-                perr("fatal error: content of '" + path + "' already exists in content store as:")
+                perr("serious error: content of '" + path + "' already exists in content store as:")
                 perr("    " + store_raw)
                 perr("but their sizes do not match.")
                 perr("*** The content in the store may be corrupt! ***")
@@ -591,7 +568,7 @@ def add(git, args):
             perr(err.strerror)
 
         # at this point everything worked for path and it has been
-        # turned into a soft link. Now stage this file.
+        # turned into a symlink. Now stage this file.
         ret = subprocess.call(["git", "add", path])
         if ret != 0:
             perr("error: failed to stage '" + path + "'")
@@ -601,9 +578,8 @@ def add(git, args):
 
 @command
 def revert(git, args):
-    """replace symbolic link with a copy of its content"""
-
-    usage = "git raw revert <file>..."
+    """Replace symlink with a copy of its content"""
+    usage = "usage: git raw revert <file>..."
 
     if not git.is_initialized():
         raise NotRawInitializedError()
@@ -615,7 +591,7 @@ def revert(git, args):
 
     paths = args
 
-    # check that every path is a link to a store
+    # check that every path is a symlink to a store
     for path in paths:
         if not git.path_is_raw_link(path):
             perr("error: '" + path + "' is not a raw file")
@@ -640,9 +616,8 @@ def revert(git, args):
 
 @command
 def unlock(git, args):
-    """replace symbolic link with a dummy ordinary file"""
-
-    usage = "git raw unlock <file>..."
+    """Replace symlink with a dummy ordinary file"""
+    usage = "usage: git raw unlock <file>..."
 
     if not git.is_initialized():
         raise NotRawInitializedError()
@@ -672,9 +647,8 @@ def unlock(git, args):
 
 @command
 def ls(git, args):
-    """list symbolic links to content stores"""
-
-    usage = "git raw ls [<file>...]"
+    """List symlinks to content stores"""
+    usage = "usage: git raw ls [<file>...]"
 
     if not git.is_initialized():
         raise NotRawInitializedError()
@@ -686,7 +660,7 @@ def ls(git, args):
             perr("error: '" + path + "' does not exist")
             return 1
 
-    # get all links in the index
+    # get all symlinks in the index
     try:
         output = check_output(["git", "ls-files", "--cached", "--stage", "-z"] + paths,
                               universal_newlines=True)
@@ -723,8 +697,7 @@ def ls(git, args):
 
 @command
 def add_store(git, args):
-    """add a content store"""
-
+    """Add a content store"""
     usage =    "usage: git raw add-store [--set-default] <store-name> <dir>"
     usage += "\n       git raw add-store --set-default <store-name>"
 
@@ -794,7 +767,6 @@ def add_store(git, args):
 @command
 def check(git, args):
     """A dummy command used during development/debugging"""
-
     print(git.git_dir)
     print(git.top_dir)
     print(git.gitraw_dir)
