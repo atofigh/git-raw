@@ -452,22 +452,42 @@ def init(git, args):
 @command
 def add(git, args):
     """Add file to a content store and replace with a symlink"""
-    usage = "usage: git raw add <file>..."
+    usage = "usage: git raw add [--store <store-name>] <file>..."
 
     if not git.is_initialized():
         raise NotRawInitializedError()
 
-    if len(args) == 0:
+    default_store_name = git.config["stores"].get("defaultAddStore")
+    paths = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--store":
+            if i + 1 >= len(args):
+                perr("error: --store expects a store name")
+                perr(usage)
+                return 1
+
+            default_store_name = args[i + 1]
+            i += 1
+        else:
+            paths.append(args[i])
+
+        i += 1
+
+    if len(paths) == 0:
         perr("error: no files specified")
         perr(usage)
         return 1
 
-    default_store_name = git.config["stores"].get("defaultAddStore")
     if default_store_name == None:
         perr("error: no default store configured")
-        return
-    default_store_path = git.config["stores"][default_store_name]
-    paths = args
+        perr(usage)
+        return 1
+
+    default_store_path = git.config["stores"].get(default_store_name)
+    if (default_store_path == None):
+        perr("error: no such store '" + default_store_name + "'")
+        return 1
 
     # check specified paths
     for path in paths:
