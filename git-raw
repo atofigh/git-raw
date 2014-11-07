@@ -765,6 +765,37 @@ def add_store(git, args):
     return 0
 
 @command
+def ls_stores(git, args):
+    """List configured content stores"""
+    usage = "usage: git raw ls-stores"
+
+    if not git.is_initialized():
+        raise NotRawInitializedError()
+
+    if len(args) > 0:
+        perr("error: unknown option")
+        perr(usage)
+        return 1
+
+    if len(git.config["stores"]) == 0:
+        return 0
+
+    default_store_name = git.config["stores"]["defaultAddStore"]
+
+    for name, path in git.config["stores"].items():
+        if name == "defaultAddStore":
+            continue
+
+        store_str = "  "
+        if name == default_store_name:
+            store_str = "* "
+
+        store_str += name + "\t" + path
+        print(store_str)
+
+    return 0
+
+@command
 def check(git, args):
     """A dummy command used during development/debugging"""
     print(git.git_dir)
