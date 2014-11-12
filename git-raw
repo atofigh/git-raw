@@ -832,6 +832,74 @@ def ls_stores(git, args):
     return 0
 
 @command
+def fix(git, args):
+    """Fix broken raw links"""
+    usage = "usage: git raw fix [<path>...]"
+
+    if not git.is_initialized():
+        raise NotRawInitializedError()
+
+    paths = args
+
+    # ensure all given paths exist
+    for path in paths:
+        if not os.path.lexists(path):
+            perr("error: '" + path + "' does not exist")
+            return 1
+
+    # get all broken raw links
+    links = git.ls_files_symlinks_in_index(paths)
+    others = git.ls_files_others(paths)
+    broken_links = [p for p in links + others if git.path_is_raw_link(p) and not os.path.exists(p)]
+
+    # make sure all links point correctly into git-raw's index directory
+    dirname = os.path.dirname
+    basename = os.path.basename
+    required_content = []
+    for sl in broken_links:
+        current_target = os.readlink(sl)
+        current_target_index_dir = os.path.join(dirname(sl), dirname(dirname(dirname(current_target))))
+        sha1 = basename(dirname(current_target))
+        target = os.path.relpath(store_mkname(git.index_dir, sha1), dirname(sl))
+
+        if (os.path.isdir(current_target_index_dir) and
+            os.path.samefile(current_target_index_dir, git.index_dir)):
+            required_content.append((sl, sha1))
+            continue
+
+        try:
+            os.remove(sl)
+            os.symlink(target, sl)
+        except OSError as err:
+            perr("error: unable to fix raw link '" + sl + "'")
+            perr(err.strerror)
+            return 1
+
+        if not os.path.exists(target):
+            required_content.append((sl, sha1))
+
+    # try to create entries in the index for all required content
+    for sl, sha1 in required_content:
+        store_path = git.find_sha1(sha1)
+
+        if store_path == None:
+            perr("could not find store content for '" + sl + "'")
+            continue
+
+        index_path = dirname(store_mkname(git.index_dir, sha1))
+        target = dirname(store_mkname(store_path, sha1))
+
+        try:
+            if os.path.lexists(index_path):
+                os.remove(index_path)
+
+            os.makedirs(dirname(index_path), exist_ok=True)
+            os.symlink(target, index_path)
+        except OSError as err:
+            perr("error: could not create symlink in index")
+            perr(err.strerror)
+            return 1
+
 def check(git, args):
     """A dummy command used during development/debugging"""
     print(git.git_dir)
