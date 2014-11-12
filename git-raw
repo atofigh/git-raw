@@ -399,6 +399,59 @@ class Git:
 
         return None
 
+    def ls_files_symlinks_in_index(self, paths):
+        """Get all symlinks in git's index
+
+        This is a simple wrapper around git's 'ls-files' command and
+        parser and returns the output from
+
+        git ls-files --cached --stage -z <path>...
+
+        Args:
+            paths: list of paths passed to git's 'ls-files' command
+
+        Returns:
+            List of paths corresponding to symlinks in the git index. If
+            'paths' is an empty list, all symlinks in the index from the
+            current working directory (recursively visiting
+            subdirectories) are returned. Otherwise, only symlinks and
+            content of directories passed in 'paths' are considered.
+        """
+
+        try:
+            output = check_output(["git", "ls-files", "--cached", "--stage", "-z"] + paths,
+                                  universal_newlines=True)
+        except CalledProcessError as err:
+            if not err.output.endswith("is outside repository\n"):
+                raise ImpossibleError
+
+            raise err
+        links = [p.split(maxsplit=3)[-1] for p in output.split("\0") if p[0:2] == "12"]
+        return links
+
+    def ls_files_others(self, paths):
+        """Get all paths (symlinks and files) not in git's index
+
+        This is a simple wrapper around git's 'ls-files' command and
+        parser and returns the output from
+
+        git ls-files --others -z <path>...
+
+        Args:
+            paths: list of paths passed to git's 'ls-files' command
+
+        Returns:
+            List of paths (file or symlinks) returned by git's
+            'ls-files' command.
+        """
+        try:
+            output = check_output(["git", "ls-files", "--others", "-z"] + paths,
+                                  universal_newlines=True)
+        except CalledProcessError as err:
+            raise ImpossibleError
+        others = output.split("\0")
+        return others
+
 
 # git-raw commands
 #
@@ -669,35 +722,9 @@ def ls(git, args):
             perr("error: '" + path + "' does not exist")
             return 1
 
-    # get all symlinks in the index
-    try:
-        output = check_output(["git", "ls-files", "--cached", "--stage", "-z"] + paths,
-                              universal_newlines=True)
-    except CalledProcessError as err:
-        if not err.output.endswith("is outside repository\n"):
-            raise ImpossibleError
-
-        perr(err.output)
-        return 1
-    links = [p.split(maxsplit=3)[-1] for p in output.split("\0") if p[0:2] == "12"]
-
-    # get files not in the index
-    try:
-        output = check_output(["git", "ls-files", "--others", "-z"],
-                              universal_newlines=True)
-    except CalledProcessError as err:
-        raise ImpossibleError
-    others = output.split("\0")
-
-    # get all deleted files
-    try:
-        output = check_output(["git", "ls-files", "--deleted", "-z"],
-                              universal_newlines=True)
-    except CalledProcessError as err:
-        raise ImpossibleError
-    deleted = output.split("\0")
-
-    raw_links = [p for p in links + others if p not in deleted and git.path_is_raw_link(p)]
+    links = git.ls_files_symlinks_in_index(paths)
+    others = git.ls_files_others(paths)
+    raw_links = [p for p in links + others if git.path_is_raw_link(p)]
 
     for rl in raw_links:
         print(rl)
