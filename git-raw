@@ -626,7 +626,8 @@ def revert(git, args):
         target = os.path.join(os.path.dirname(path), os.readlink(path))
 
         if not os.path.exists(path):
-            perr("error: '" + target + "' does not exist")
+            perr("error: cannot revert '" + path + "'")
+            perr("'" + target + "' does not exist")
             return 1
 
         os.remove(path)
