@@ -209,7 +209,7 @@ class Git:
 
         self.dummy_header = "$git raw dummy$"
 
-        if (self.is_initialized()):
+        if self.is_initialized():
             # create case-sensitive ConfigParser instance
             self.config = configparser.ConfigParser()
             self.config.optionxform = lambda option: option
@@ -325,7 +325,7 @@ class Git:
 
         target = os.readlink(path)
 
-        if (os.path.isabs(target)):
+        if os.path.isabs(target):
             return False
 
         # check if the target of the symlink ends with something like
@@ -526,7 +526,7 @@ def add(git, args):
         return 1
 
     default_store_path = git.config["stores"].get(default_store_name)
-    if (default_store_path == None):
+    if default_store_path == None:
         perr("error: no such store '" + default_store_name + "'")
         return 1
 
