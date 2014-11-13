@@ -12,9 +12,10 @@ import re
 import shutil
 import time
 import configparser
+import textwrap
 
 gitraw_usage = """\
-usage: git raw <command> [<args>]
+usage: git raw <command> [--help | -h] [<args>]
 
 git-raw is a plug-in for git that simplifies the process of storing and
 managing large and/or binary files that need to be kept in sync with a
@@ -155,6 +156,17 @@ def check_storename(name):
         True if 'name' can be used to name a store and False otherwise
     """
     return re.match("[a-zA-Z0-9_-]+\\Z", name) != None and name != "defaultAddStore"
+
+def get_usage(command):
+    """parses out the usage string from 'doc_str'
+
+    Args:
+        command: A git-raw command with a __doc__ attribute.
+
+    Returns:
+        The second paragraph of 'command.__doc__'.
+    """
+    return textwrap.dedent(command.__doc__.split("\n\n", 2)[1]).rstrip()
 
 
 class Git:
@@ -460,12 +472,21 @@ class Git:
 # list 'args' of command-line arguments.
 @command
 def init(git, args):
-    """Initialize git repository for use by git-raw"""
-    usage = "usage: git raw init"
+    """Initialize git repository for use by git-raw
 
+    usage: git raw init
+
+    This command prepares the git repository of the current working
+    directory for use with git-raw. It will create a 'git-raw' directory
+    in the '.git' directory of the git repository. The 'git-raw'
+    directory will contain all the configuration files and links to
+    content stores that are used by git-raw.
+
+    Currently, git-raw does not support using the $GIT_DIR environment variable.
+    """
     if len(args) > 0:
         perr("error: unknown option")
-        perr(usage)
+        perr(get_usage(init))
         return 1
 
     if git.is_initialized():
@@ -492,9 +513,27 @@ def init(git, args):
 
 @command
 def add(git, args):
-    """Add file to a content store and replace with a symlink"""
-    usage = "usage: git raw add [--store <store-name>] <file>..."
+    """Add files to a content store and replace with a symlink
 
+    usage: git raw add [--store <store-name>] <file>...
+
+    Adds the content of each given file to a configured content store
+    and replaces each file with a symlink, which is then staged for
+    commit using Git's 'add' command.
+
+    Unless a store is specified with the --store option, all content is
+    added to the store that is configured as the default add store.
+
+    The contents are stored as read-only files. To unlock the contents
+    temporarily so that they can be overwritten, see the 'unlock'
+    command. To replace a symlink with its original content, see the
+    'revert' command.
+
+    Options:
+
+    --store <store-name>
+        Add all content to the the store configured as <store-name>
+    """
     if not git.is_initialized():
         raise NotRawInitializedError()
 
@@ -505,7 +544,7 @@ def add(git, args):
         if args[i] == "--store":
             if i + 1 >= len(args):
                 perr("error: --store expects a store name")
-                perr(usage)
+                perr(get_usage(add))
                 return 1
 
             default_store_name = args[i + 1]
@@ -517,12 +556,12 @@ def add(git, args):
 
     if len(paths) == 0:
         perr("error: no files specified")
-        perr(usage)
+        perr(get_usage(add))
         return 1
 
     if default_store_name == None:
         perr("error: no default store configured")
-        perr(usage)
+        perr(get_usage(add))
         return 1
 
     default_store_path = git.config["stores"].get(default_store_name)
@@ -639,15 +678,16 @@ def add(git, args):
 
 @command
 def revert(git, args):
-    """Replace symlink with a copy of its content"""
-    usage = "usage: git raw revert <file>..."
+    """Replace symlink with a copy of its content
 
+    usage: git raw revert <file>...
+    """
     if not git.is_initialized():
         raise NotRawInitializedError()
 
     if len(args) == 0:
         perr("error: no files specified")
-        perr(usage)
+        perr(get_usage(revert))
         return 1
 
     paths = args
@@ -678,15 +718,16 @@ def revert(git, args):
 
 @command
 def unlock(git, args):
-    """Replace symlink with a dummy ordinary file"""
-    usage = "usage: git raw unlock <file>..."
+    """Replace symlink with a dummy ordinary file
 
+    usage: git raw unlock <file>...
+    """
     if not git.is_initialized():
         raise NotRawInitializedError()
 
     if len(args) == 0:
         perr("error: no files specified")
-        perr(usage)
+        perr(get_usage(unlock))
         return 1
 
     paths = args
@@ -709,9 +750,10 @@ def unlock(git, args):
 
 @command
 def ls(git, args):
-    """List symlinks to content stores"""
-    usage = "usage: git raw ls [--broken] [<file>...]"
+    """List symlinks to content stores
 
+    usage: git raw ls [--broken] [<file>...]
+    """
     if not git.is_initialized():
         raise NotRawInitializedError()
 
@@ -743,16 +785,17 @@ def ls(git, args):
 
 @command
 def add_store(git, args):
-    """Add a content store"""
-    usage =    "usage: git raw add-store [--set-default] <store-name> <dir>"
-    usage += "\n       git raw add-store --set-default <store-name>"
+    """Add a content store
 
+    usage: git raw add-store [--set-default] <store-name> <dir>
+           git raw add-store --set-default <store-name>
+    """
     if not git.is_initialized():
         raise NotRawInitializedError()
 
     if len(args) < 2 or len(args) > 3:
         perr("error: wrong number of arguments")
-        perr(usage)
+        perr(get_usage(add_store))
         return 1
 
     setdefault = False
@@ -773,7 +816,7 @@ def add_store(git, args):
             argcount += 1
         else:
             perr("error: wrong arguments")
-            perr(usage)
+            perr(get_usage(add_store))
             return 1
 
     if directory == None:
@@ -812,15 +855,16 @@ def add_store(git, args):
 
 @command
 def ls_stores(git, args):
-    """List configured content stores"""
-    usage = "usage: git raw ls-stores"
+    """List configured content stores
 
+    usage: git raw ls-stores
+    """
     if not git.is_initialized():
         raise NotRawInitializedError()
 
     if len(args) > 0:
         perr("error: unknown option")
-        perr(usage)
+        perr(get_usage(ls_stores))
         return 1
 
     if len(git.config["stores"]) == 0:
@@ -843,9 +887,10 @@ def ls_stores(git, args):
 
 @command
 def fix(git, args):
-    """Fix broken raw links"""
-    usage = "usage: git raw fix [<path>...]"
+    """Fix broken raw links
 
+    usage: git raw fix [<path>...]
+    """
     if not git.is_initialized():
         raise NotRawInitializedError()
 
@@ -911,6 +956,51 @@ def fix(git, args):
             return 1
 
 @command
+def help(git, args):
+    """Show help on git-raw subcommands
+
+    usage: git raw help [<command>]
+    """
+    if len(args) == 0:
+        print(gitraw_usage)
+        return 0
+
+    cmd_name = args[0]
+
+    if cmd_name not in commands:
+        perr("'" + cmd_name + "'", "is not a git-raw command")
+        perr(get_usage(help))
+        return 1
+
+    cmd = commands[cmd_name]
+    doc = cmd.__doc__
+
+    if (doc == None):
+        print("No help available for command '" + cmd_name + "'")
+        return 0
+
+    paragraphs = doc.split("\n\n", 2)
+
+    summary = paragraphs[0].rstrip()
+    usage = None
+    rest = None
+
+    if len(paragraphs) >= 2:
+        usage = textwrap.dedent(paragraphs[1].rstrip())
+    if len(paragraphs) >= 3:
+        rest = textwrap.dedent(paragraphs[2].rstrip())
+
+    print(summary)
+    if usage != None:
+        print()
+        print(usage)
+    if rest != None:
+        print()
+        print(rest)
+
+    return 0
+
+@command
 def check(git, args):
     """A dummy command used during development/debugging"""
     print(git.git_dir)
@@ -923,19 +1013,42 @@ def check(git, args):
 # add command names to usage string
 commands_usages_short = ["    " + name + " "*(12 - len(name)) + f.__doc__.split('\n', 1)[0] for (name, f) in commands.items()]
 commands_usages_short.sort()
-gitraw_usage = gitraw_usage + "\n\nAvailable commands: \n" + "\n".join(commands_usages_short)
+gitraw_usage += "\n\nAvailable commands: \n" + "\n".join(commands_usages_short)
+gitraw_usage += "\n\nUse 'git help <command>' to read about a specific subcommand"
 
 def main():
     if len(sys.argv) <= 1:
         perr(gitraw_usage)
         return 1
 
+    flag_help = False
+    cmd_name = None
+    args = []
+    for arg in sys.argv[1:]:
+        if arg == "--help" or arg == "-h":
+            flag_help = True
+            continue
+
+        if cmd_name == None:
+            cmd_name = arg
+            continue
+
+        args.append(arg)
+
+    if flag_help:
+        if cmd_name in commands:
+            commands["help"](None, [cmd_name])
+        else:
+            commands["help"](None, [])
+
+        return 0
+
     try:
-        if sys.argv[1] not in commands:
+        if cmd_name not in commands:
             raise UnknownCommandError(sys.argv[1])
 
         git = Git()
-        return commands[sys.argv[1]](git, sys.argv[2:])
+        return commands[cmd_name](git, args)
     except GitRawError as err:
         perr("git-raw:", err)
         return 1
