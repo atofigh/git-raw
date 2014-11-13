@@ -934,6 +934,11 @@ def fix(git, args):
             required_content.append((sl, sha1))
 
     # try to create entries in the index for all required content
+    if len(required_content) > 0 and len(git.config["stores"]) == 0:
+        perr("error: no stores have been configured")
+        perr("See the 'add-store' command")
+        return 1
+
     for sl, sha1 in required_content:
         store_path = git.find_sha1(sha1)
 
