@@ -910,6 +910,7 @@ def fix(git, args):
             perr(err.strerror)
             return 1
 
+@command
 def check(git, args):
     """A dummy command used during development/debugging"""
     print(git.git_dir)
