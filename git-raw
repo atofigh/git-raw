@@ -710,12 +710,19 @@ def unlock(git, args):
 @command
 def ls(git, args):
     """List symlinks to content stores"""
-    usage = "usage: git raw ls [<file>...]"
+    usage = "usage: git raw ls [--broken] [<file>...]"
 
     if not git.is_initialized():
         raise NotRawInitializedError()
 
-    paths = args
+    flag_broken = False
+    paths = []
+    for arg in args:
+        if arg == "--broken":
+            flag_broken = True
+            continue
+
+        paths.append(arg)
 
     for path in paths:
         if not os.path.lexists(path):
@@ -725,6 +732,9 @@ def ls(git, args):
     links = git.ls_files_symlinks_in_index(paths)
     others = git.ls_files_others(paths)
     raw_links = [p for p in links + others if git.path_is_raw_link(p)]
+
+    if flag_broken:
+        raw_links = [p for p in raw_links if not os.path.exists(p)]
 
     for rl in raw_links:
         print(rl)
