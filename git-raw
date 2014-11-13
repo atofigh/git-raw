@@ -680,7 +680,12 @@ def add(git, args):
 def revert(git, args):
     """Replace symlink with a copy of its content
 
-    usage: git raw revert <file>...
+    usage: git raw revert <raw-link>...
+
+    Replaces the symlinks given as arguments with their actual
+    content. This is useful mainly when content needs to be appended to
+    a raw file. If you need to overwrite the content, use 'git raw
+    unlock' instead.
     """
     if not git.is_initialized():
         raise NotRawInitializedError()
@@ -720,7 +725,14 @@ def revert(git, args):
 def unlock(git, args):
     """Replace symlink with a dummy ordinary file
 
-    usage: git raw unlock <file>...
+    usage: git raw unlock <raw-link>...
+
+    This is useful when content needs to be replaced, since all raw
+    content is write-protected. Each raw-link given as argument will be
+    replaced with a small dummy file that can then be overwritten. Once
+    new content has been created, use 'git raw add' to add the new
+    content to a content store and commit the raw-link to the git
+    repository.
     """
     if not git.is_initialized():
         raise NotRawInitializedError()
@@ -750,9 +762,22 @@ def unlock(git, args):
 
 @command
 def ls(git, args):
-    """List symlinks to content stores
+    """List raw-links in the working directory
 
     usage: git raw ls [--broken] [<file>...]
+
+    Without arguments, the 'ls' command will list all the raw-links in
+    the current working directory and recursively in any
+    subdirectories. Otherwise, all raw-links among the arguments and
+    raw-links in the directories given as argument are listed.
+
+    Options:
+
+    --broken
+        List only raw-links that do not point to existing files. Useful
+        when you need to know which file content are missing
+
+    See the 'fix' command for how to fix broken raw-links.
     """
     if not git.is_initialized():
         raise NotRawInitializedError()
@@ -789,6 +814,31 @@ def add_store(git, args):
 
     usage: git raw add-store [--set-default] <store-name> <dir>
            git raw add-store --set-default <store-name>
+
+    You need to tell git-raw where to store file content that should be
+    stored outside the normal Git repository. A set of directories can
+    be configured for use by git-raw using the 'add-store'
+    command. These directories are called "content stores". Each content
+    store is associated with a unique name to which it is referred in
+    commands.
+
+    A default content store, called the "default add store", must be
+    configured for use by git-raw's 'add' command. See 'git raw help
+    add' for info on how to specify a store other than the default to
+    which content should be added. The first store to be configured will
+    become the default add store. The default add store can be changed
+    at any time using the --set-default flag
+
+    Options:
+
+    --set-default
+
+        When only a <store-name> is given as argument along with the
+        --set-default option, the <store-name> must name an already
+        configured content store, in which case it becomes the default
+        add store. Otherwise, a directory is also given and the
+        <store-name> is configured as a content store and will be set to
+        the default add store.
     """
     if not git.is_initialized():
         raise NotRawInitializedError()
@@ -858,6 +908,9 @@ def ls_stores(git, args):
     """List configured content stores
 
     usage: git raw ls-stores
+
+    lists each configured store with its name and path. The default add
+    store is indicated with an asterisk.
     """
     if not git.is_initialized():
         raise NotRawInitializedError()
@@ -890,6 +943,18 @@ def fix(git, args):
     """Fix broken raw links
 
     usage: git raw fix [<path>...]
+
+    Will look recursively at the paths given as arguments to fix any
+    broken raw-links. Links that have been moved will be set correctly
+    and an attempt will be made to find content in any of the configured
+    content stores.
+
+    The order in which content is searched for is currently determined
+    by the order in which the stores where added using the 'add-store'
+    command. To change the order, you can reorder the stores in
+    git-raw's config file located in:
+
+    .git/git-raw/config
     """
     if not git.is_initialized():
         raise NotRawInitializedError()
