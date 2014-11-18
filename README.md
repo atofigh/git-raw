@@ -1,168 +1,103 @@
 # git-raw
 
-A [Git](http://www.git-scm.com) plug-in for managing (very) large files.
+A [Git](http://www.git-scm.com) plug-in for managing binary and/or large files.
 
-## Goal statement
+#### The problem:
 
-The plug-in should
+Adding large files (such as media files or databases) to a Git repository is unwieldy and often results in poor performance (e.g., slow cloning of repositories) and unnecessary duplication of file content (as a result of having one copy in the Git repository and one copy checked out in the working directory).
 
-- provide intuitive Git-flavored commands
-- allow distributed multi-user work flows
-- allow centralized multi-user work flows
-- handle sharing of large files across multiple Git clones (even across separate projects) without redundant copies on disk
-- track the history of large files in a Git repository similar to normal files (with some caveats, e.g., diffs)
-- allow the user to manage disk space by cherry-picking the files he/she wants to have available locally at any one time
-- assist in practical management of up/downloads of files between clones and remotes
+#### git-raw's solution:
 
-## Foundations
+Store the content of large files separately from the Git repository and let Git track symbolic links to such content.
 
-Similar to Git, git-raw stores files as a set of key/value pairs, with keys being the SHA-1 hash of each file's content. Within a Git repository, symlinks are used to point to file content and to keep track of version history.
+#### Why this is a good solution:
 
-### Content stores
+- Results in **small Git repositories** and **fast Git operations**
+- Only a **single local copy** of each large file's content is required **across any number of repositories**, even for distinct projects that share content
+- **Local store contents can be kept manageable in size** by purging historic content that is no longer actively used. The full set of historic contents can be stored in a few locations and accesses as need arises.
 
-git-raw can be customized to use multiple user-defined locations for the storage of files. These locations may be directories on local hard drives, network drives, USB drives etc., and are called content stores. git-raw allows each user to define his/her own preferred set of stores in which to store content. Distinct repositories on the same local machine can share content stores thereby minimize redundancies in cases when different repositories have some large files in common.
+## A small example
 
-## Getting started
+After some initial setup, using git-raw can be as simple as the following:
 
-### Installation
+Here is a large file that I need to track in my Git repository
 
-Clone the git-raw repository somewhere on your system and add the git-raw directory to your system's PATH environment variable. This is all you need to do get access to a new git command called 'raw'.
+```
+$ ls -lh
+total 423264
+-rw-r--r--  1 user  staff     6B 17 Nov 21:07 a-file.txt
+-rw-r--r--  1 user  staff   207M 17 Nov 21:08 huge       # <-- a big clunky file
+```
 
-### Getting help
+With git-raw's `add` command, I can move the content of the file to a local directory and replace the file with a symbolic link that is staged for committing:
 
-The git-raw plugin uses a subcommand structure similar to Git itself. To list all the available git-raw commands along with a short description of each do
+```
+$ git raw add huge
+$ ls -lh
+total 16
+-rw-r--r--  1 user  staff     6B 17 Nov 21:07 a-file.txt
+lrwxr-xr-x  1 user  staff    66B 17 Nov 21:09 huge -> .git/git-raw/index/e2/e28a574342a066a2431ec4520ef6a7648c12ab52/raw
+$ git status
+On branch master
+Changes to be committed:
+  (use "git reset HEAD <file>..." to unstage)
 
-    $ git raw help
+        new file:   huge
 
-The help for each subcommand is available via the `help` command, for example:
+```
 
-    $ git raw help add
+Next, the link is committed into Git:
 
-### Initializing a Git repository for use by git-raw
+```
+$ git commit -m 'add huge file'
+[master 58d9bb8] add huge file
+ 1 file changed, 1 insertion(+)
+ create mode 120000 huge
+```
 
-To use git raw to manage binary/large files in your Git repository, you need to initialize you Git repository with the 'init' command and configure content stores where file content will be stored. Inside the working directory of an existing git repository do:
+## Latest release
 
-    $ git raw init
-    $ git raw add-store <store-name> <dir>
+git-raw is currently in pre-alpha. Testing is scheduled to begin shortly.
 
-where `<store-name>` should be a short name you will use to refer to the content store in `<dir>` in future commands. More stores can be added as required.
+## Dependencies
 
-### Adding files to content stores
+The plug-in is written in Python version 3. Testing will determine the latest version of Python required.
 
-The main commands for managing binary files in your git repository are:
+## Installation
 
-- add
-- unlock
-- revert
-- fix
+To use the latest development version, clone the repository somewhere and add its location to your `PATH` environment variable. That is all you need to do to get access to a new Git command called `raw`. Alternatively, copy the `git-raw` file to a directory that is already in your `PATH`
 
-#### add
+## Documentation
 
-The 'add' command will move the content of files to a content store and replace the files with symlinks that are then added to git's staging area for committing. The permissons on contents in a store are kept read-only. The symlinks that replaced the actual files are called raw-links.
+The goals and internal design of git-raw is described [here](docs/goals-and-design.md)
 
-    $ ls -l
-    total 423264
-    -rw-r--r--  1 alix  staff          6 13 Nov 12:24 a-file.txt
-    -rw-r--r--  1 alix  staff  216707072 13 Nov 12:23 big-file
-    $ git status
-    On branch master
-    Untracked files:
-      (use "git add <file>..." to include in what will be committed)
+To get started, take a look at the [tutorial](/docs/tutorial.md)
 
-            big-file
+Detailed help for individual git-raw commands can be viewed using git-raw's `help` command. See `git raw help` for more info:
 
-    nothing added to commit but untracked files present (use "git add" to
-    track)
-    $ git raw add big-file
-    $ ls -l
-    total 16
-    -rw-r--r--  1 alix  staff   6 13 Nov 12:24 a-file.txt
-    lrwxr-xr-x  1 alix  staff  66 13 Nov 12:25 big-file -> .git/git-raw/index/e2/e28a574342a066a2431ec4520ef6a7648c12ab52/raw
-    $ git status
-    On branch master
-    Changes to be committed:
-      (use "git reset HEAD <file>..." to unstage)
+```
+$ git raw help
+usage: git raw <command> [--help | -h] [<args>]
 
-            new file:   big-file
+git-raw is a plug-in for git that simplifies the process of storing and
+managing large and/or binary files that need to be kept in sync with a
+source code repository.
 
-    $ git commit -m 'added huge file'
-    [master c4c9572] added huge file
-    1 file changed, 1 insertion(+)
-    create mode 120000 big-file
-    $
 
-#### unlock
+Available commands:
+    add         Add files to a content store and replace with a symlink
+    add-store   Add a content store
+    check       A dummy command used during development/debugging
+    fix         Fix broken raw links
+    help        Show help on git-raw subcommands
+    init        Initialize git repository for use by git-raw
+    ls          List raw-links in the working directory
+    ls-stores   List configured content stores
+    revert      Replace symlink with a copy of its content
+    unlock      Replace symlink with a dummy ordinary file
 
-If you need to replace the content of a raw-link, use the 'unlock' command to replace the raw-link with a writeable dummy file that can be overwritten. Once the content has been replaced, add the new content using `git raw add`. Both the old and the new content will be saved in a configured store and are made available when they are checked out as part of the commits.
-
-    $ git raw unlock big-file
-    $ ls -l
-    total 16
-    -rw-r--r--  1 alix  staff   6 13 Nov 12:24 a-file.txt
-    -rw-r--r--  1 alix  staff  96 13 Nov 15:01 big-file
-    $ cat big-file
-    $git raw dummy$
-    big-file -->
-    .git/git-raw/index/e2/e28a574342a066a2431ec4520ef6a7648c12ab52/raw
-    $ echo "new content" > big-file
-    $ git raw add big-file
-    $ git status
-    On branch master
-    Changes to be committed:
-      (use "git reset HEAD <file>..." to unstage)
-
-            modified:   big-file
-
-    $ git commit -m 'changed big-file'
-    [master b45d0f1] changed big-file
-     1 file changed, 1 insertion(+), 1 deletion(-)
-    $ ls -l
-    total 16
-    -rw-r--r--  1 alix  staff   6 13 Nov 12:24 a-file.txt
-    lrwxr-xr-x  1 alix  staff  66 13 Nov 15:02 big-file ->
-    .git/git-raw/index/8b/8b787bd9293c8b962c7a637a9fd
-    bf627fe68610e/raw
-    $
-
-Note how the symlink changed when the content of 'big-file' changed.
-
-If you want to undo the affect of the 'unlock' command, use Git's 'checkout' command to checkout the raw-link previously committed to Git.
-
-#### revert
-
-Sometimes, you may want to append content to the raw files or change the raw file content directly instead of overwriting it. Since the contents of files handled by git-raw are kept read-only, you need a way to revert the raw-link back to an ordinary file. You can use the 'revert' command for this:
-
-    $ ls -l
-    total 16
-    -rw-r--r--  1 alix  staff   6 13 Nov 12:24 a-file.txt
-    lrwxr-xr-x  1 alix  staff  66 13 Nov 15:02 big-file ->
-    .git/git-raw/index/8b/8b787bd9293c8b962c7a637a9fd
-    bf627fe68610e/raw
-    $ git raw revert big-file
-    $ ls -l
-    total 16
-    -rw-r--r--  1 alix  staff   6 13 Nov 12:24 a-file.txt
-    -rw-r--r--  1 alix  staff  12 13 Nov 15:02 big-file
-    $ cat big-file
-    new content
-    $ git status
-    On branch master
-    Changes not staged for commit:
-      (use "git add <file>..." to update what will be committed)
-      (use "git checkout -- <file>..." to discard changes in working directory)
-
-            typechange: big-file
-
-    no changes added to commit (use "git add" and/or "git commit -a")
-    $
-
-Note that most of the time, the 'unlock' command is preferable since there will be no copying involved. Use the 'revert' command if you really need to be able to both read and write to the file at the same time.
-
-#### fix
-
-The fix command is used whenever a raw-link has been broken, either because the store location changed or because the symlink was moved to a different directory. You can run the 'fix' command on the whole repository or only a part of it. It will do its best to fix the symlinks to point to content in the configured content stores.
-
-The 'fix' command is especially useful after cloning a repository that is using git-raw to manage content. After cloning a repository, you should first run the command `git raw init` to initialized the repository for use by git-raw. Then use the 'add-stores' command to set up content stores. And finally, you should run `git raw fix` at the top level directory to point all the symlinks to their actual contents.
+Use 'git help <command>' to read about a specific subcommand
+```
 
 ## Other similar projects
 
