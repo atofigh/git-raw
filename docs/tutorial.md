@@ -205,3 +205,29 @@ new content
 ### ls
 
 The `ls` command is used to list raw-links. With the `--broken` flag, `ls` will list only broken raw-links that need to be `fix`ed. See `git raw help ls` for details.
+
+## Managing content stores
+
+At the moment, git-raw does not have builtin commands for managing content stores. These will (hopefully) be added in the future.
+
+In the meantime, the easiest solution is to keep content stores synced across different machines using `rsync`. To copy the missing contents from one store to another, you could do
+
+```
+$ rsync -r --ignore-existing --perm --chmod=Fa-w,Dg+w <src-store>/ <dest-store>
+```
+
+The `<src-store>` and `<dest-store>` are paths to content stores, with possibly one of them being on a remote maching. Please note that the slash after `<src-store>/` is very important. As a concrete example, assume that you have a content store locally on your machine at `/my/local/store-1` and you want to copy over content to a store `/central/stores/store-8` that resides on a remote machine called 'server', on which your username is 'user'. You could then do:
+
+```
+rsync -r --ignore-existing --perm --chmod=Fa-w /my/local/store-1/ user@server:/central/stores/store-8
+```
+
+To get all the missing content from the remote machine, reverse the order of the local store and the store on the server, but don't forget the `/` after the source!
+
+```
+rsync -r --ignore-existing --perm --chmod=Fa-w user@server:/central/stores/store-8/ /my/local/store-1
+```
+
+### A note on store permissions
+
+The above rsync commands will copy contents between stores and remove any write permissions on the files. Often, it is also practical to set the group write permissions on the directories in the store so that other users can add content. One way to achieve that is to change the `--chmod=Fa-w` option in the above commands to `--chmod=Fa-w,Dg+w`. For more configuration options, see the rsync manual.
