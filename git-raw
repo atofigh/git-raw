@@ -183,7 +183,7 @@ class Git:
         config_file: Path to the git raw config file
         config: A ConfigParser object corresponding to the git-raw
             config file. Exists only if repository is git-raw-initialized.
-        dummy_header: A string that is written to all dummy files created by
+        dummy_header: A string (Bytes) written to all dummy files created by
             the 'unlock' command
     """
     def __init__(self):
@@ -219,7 +219,7 @@ class Git:
         self.index_dir = os.path.join(self.gitraw_dir, "index")
         self.config_file = os.path.join(self.gitraw_dir, "config")
 
-        self.dummy_header = "$git raw dummy$"
+        self.dummy_header = b"$git raw dummy$"
 
         if self.is_initialized():
             # create case-sensitive ConfigParser instance
@@ -362,13 +362,14 @@ class Git:
         if os.path.islink(path) or not os.path.isfile(path):
             return False
 
-        with open(path, "r") as f:
-            line1 = f.readline(20)
-            if line1 != self.dummy_header + "\n":
+        with open(path, "rb") as f:
+            line1 = f.read(len(self.dummy_header))
+            if line1 != self.dummy_header:
                 return False
 
-            line2 = f.readline(1000)
-            if " --> " not in line2:
+            f.read(1)  # remove new-line
+            line2 = f.read(1000)
+            if b" --> " not in line2:
                 return False
 
         return True
@@ -754,8 +755,10 @@ def unlock(git, args):
         link_target = os.readlink(path)
 
         os.remove(path)
-        with open(path, "w") as dummy_file:
-            dummy_file.write(git.dummy_header + "\n")
+        with open(path, "wb") as dummy_file:
+            dummy_file.write(git.dummy_header + b"\n")
+
+        with open(path, "a") as dummy_file:
             dummy_file.write(git_path + " --> " + link_target + "\n")
 
     return 0
