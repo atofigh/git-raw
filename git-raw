@@ -1095,11 +1095,16 @@ def main():
         return 1
 
     flag_help = False
+    flag_debug = False
     cmd_name = None
     args = []
     for arg in sys.argv[1:]:
         if arg == "--help" or arg == "-h":
             flag_help = True
+            continue
+
+        if arg == "--debug":
+            flag_debug = True
             continue
 
         if cmd_name == None:
@@ -1125,6 +1130,13 @@ def main():
     except GitRawError as err:
         perr("git-raw:", err)
         return 1
+    except:
+        perr("fatal error: unknown and unexpected error")
+        if flag_debug:
+            raise
+        else:
+            perr("rerun with the --debug flag to see a traceback")
+            return 2
 
     return 0
 
