@@ -497,13 +497,23 @@ def init(git, args):
     # create directory structure under $GITDIR/git-raw
     dirs =  [git.gitraw_dir, git.index_dir]
     for path in dirs:
-        os.makedirs(path, exist_ok=True)
+        try:
+            os.makedirs(path, exist_ok=True)
+        except OSError as err:
+            perr("error: could not create directory '" + path + "'")
+            perr(err.strerror)
+            return 1
 
     # create an empty config file
-    with open(git.config_file, "w") as cfg:
-        config = configparser.ConfigParser()
-        config.add_section("stores")
-        config.write(cfg)
+    try:
+        with open(git.config_file, "w") as cfg:
+            config = configparser.ConfigParser()
+            config.add_section("stores")
+            config.write(cfg)
+    except OSError as err:
+        perr("error: could not create config file")
+        perr(err.strerror)
+        return 1
 
     # write instructions on how to add stores
     print("Initialized Git repository for git-raw")
