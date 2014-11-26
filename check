@@ -9,14 +9,14 @@ command -v python3 >/dev/null 2>&1 || { echo >&2 "error: could not run 'python3'
 
 # check that we are in the correct directory
 for dir in test test/tests ; do
-    if [ ! -d "$dir" ]; then
+    if [[ ! -d "$dir" ]]; then
         echo >&2 "error: no directory '$dir'"
         echo >&2 "'check' should be called in the toplevel git-raw source directory"
         exit 1
     fi
 done
 
-if [ ! -x git-raw ]; then
+if [[ ! -x git-raw ]]; then
     echo >&2 "'check' should be called in the toplevel git-raw source directory"
     exit 1
 fi
@@ -37,9 +37,9 @@ topdir=$(pwd)
 # define common functions
 test_begin ()
 {
-    exec 3>&1 4>&2 1>"$1" 2>&1
+    exec 3>&1 4>&2 1>>"$1" 2>&1
 
-    if [ $# -gt 1 ]; then
+    if [[ $# -gt 1 ]]; then
         echo "=== $2 ==="
     fi
 
@@ -51,11 +51,11 @@ expect_fail ()
     set +x
     exec 1>&3 2>&4
 
-    if [ $1 -ne 0 ]; then
+    if [[ $1 -ne 0 ]]; then
         echo -n "."
         return 0
     else
-        echo -n "x"
+        echo -n "!"
         return 1
     fi
 }
@@ -65,11 +65,11 @@ expect_success ()
     set +x
     exec 1>&3 2>&4
 
-    if [ $1 -eq 0 ]; then
+    if [[ $1 -eq 0 ]]; then
         echo -n "."
         return 0
     else
-        echo -n "x"
+        echo -n "!"
         return 1
     fi
 }
@@ -79,14 +79,15 @@ export PATH="$(pwd):$PATH"
 export tmpdir logdir topdir
 export -f test_begin expect_fail expect_success
 cd "$tmpdir"
+
 set +e
 fails=0
 bash "$topdir/test/tests/test_init.sh" || fails=$((fails + 1))
 
-if [ $fails -eq 0 ]; then
+if [[ $fails -eq 0 ]]; then
     echo "all tests passed"
     exit 0
-elif [ $fails -eq 1 ]; then
+elif [[ $fails -eq 1 ]]; then
     echo "1 test failed"
     echo "see log files for details"
     exit 1
