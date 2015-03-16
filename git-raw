@@ -622,7 +622,7 @@ def add(git, args):
                 perr(err.strerror)
                 return 1
             try:
-                os.rename(path, store_raw)
+                shutil.move(path, store_raw) 
             except OSError as err:
                 perr("error: unable to move '" + path + "' to the store")
                 perr(err.strerror)
