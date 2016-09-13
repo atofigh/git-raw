@@ -979,6 +979,9 @@ def fix(git, args):
         if not os.path.lexists(path):
             perr("error: '" + path + "' does not exist")
             return 1
+    if not paths:
+        print("error: git raw fix expects a path") 
+        return 1
 
     # get all broken raw links
     links = git.ls_files_symlinks_in_index(paths)
